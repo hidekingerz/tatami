@@ -62,6 +62,29 @@ struct SnapEngineTests {
         #expect(windows.setFrameCalls.last?.width == 1280)
     }
 
+    @Test func 最小幅制約で右端からはみ出したら画面内へ戻す() {
+        windows.minimumWidth = 800
+        let engine = makeEngine()
+        engine.perform(.cycleRight)   // 右半分 960
+        engine.perform(.cycleRight)   // 右 1/3 (x = 1280, 幅 640) を要求するが幅 800 に丸められる
+        #expect(windows.currentFrame.maxX == 1920)
+        #expect(windows.setFrameCalls.last == CGRect(x: 1120, y: 25, width: 800, height: 1010))
+        #expect(engine.memory?.action == .rightThird)
+        #expect(engine.memory?.appliedFrame == windows.currentFrame)
+    }
+
+    @Test func setFrameが失敗したら失敗フックを呼び記憶を作らない() {
+        windows.setFrameError = .axError(.failure)
+        var captured: [SnapFailure] = []
+        let engine = makeEngine { captured.append($0) }
+        engine.perform(.maximize)
+        #expect(captured.count == 1)
+        if case .window(.axError(.failure)) = captured.first {} else {
+            Issue.record("window(axError(failure)) ではなく \(String(describing: captured.first))")
+        }
+        #expect(engine.memory == nil)
+    }
+
     @Test func 権限がなければsetFrameを呼ばず再要求する() {
         permission.isTrusted = false
         var captured: [SnapFailure] = []

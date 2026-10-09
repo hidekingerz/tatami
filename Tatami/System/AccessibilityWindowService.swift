@@ -4,11 +4,18 @@ import ApplicationServices
 
 /// AXUIElement を使った WindowService の実装。
 struct AccessibilityWindowService: WindowService {
+    /// AX 呼び出し 1 回あたりの待ち時間の上限（秒）。既定は約 6 秒。
+    private static let messagingTimeout: Float = 1
+
     func focusedWindow() throws -> WindowHandle {
         guard let app = NSWorkspace.shared.frontmostApplication else {
             throw WindowServiceError.noFrontmostApplication
         }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        // AX 呼び出しは同期 IPC で、メインスレッドから呼んでいる。最前面アプリが応答しないと
+        // その間ショートカットもメニューも止まるので、待ち時間を短く切る。
+        // タイムアウトは要素ごとの設定で子要素に引き継がれないため、ウィンドウ要素にも別途設定する。
+        AXUIElementSetMessagingTimeout(appElement, Self.messagingTimeout)
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &value)
         guard result == .success else {
@@ -17,7 +24,9 @@ struct AccessibilityWindowService: WindowService {
         guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
             throw WindowServiceError.invalidValue
         }
-        return WindowHandle(element: value as! AXUIElement)
+        let windowElement = value as! AXUIElement
+        AXUIElementSetMessagingTimeout(windowElement, Self.messagingTimeout)
+        return WindowHandle(element: windowElement)
     }
 
     func frame(of window: WindowHandle) throws -> CGRect {

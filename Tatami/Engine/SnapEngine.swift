@@ -63,7 +63,17 @@ final class SnapEngine {
             let targetAX = CoordinateConverter.toAccessibility(targetNS, primaryHeight: primaryHeight)
 
             try windowService.setFrame(targetAX, of: window)
-            let appliedAX = try windowService.frame(of: window)
+            var appliedAX = try windowService.frame(of: window)
+
+            // 最小サイズ制約で目標より大きくなると、右端・下端に寄せた区画では画面外へはみ出す。
+            // そのときは実際の大きさのまま位置だけ visibleFrame の内側へ戻し、もう一度読み直す。
+            let visibleAX = CoordinateConverter.toAccessibility(region.visibleFrame, primaryHeight: primaryHeight)
+            let correctedOrigin = Self.originKeptInside(appliedAX, visible: visibleAX)
+            if correctedOrigin != appliedAX.origin {
+                try windowService.setFrame(CGRect(origin: correctedOrigin, size: appliedAX.size), of: window)
+                appliedAX = try windowService.frame(of: window)
+            }
+
             memory = CycleMemory(window: window, action: action, appliedFrame: appliedAX)
             logger.debug("\(String(describing: action)) -> \(String(describing: appliedAX))")
         } catch let error as WindowServiceError {
@@ -71,6 +81,21 @@ final class SnapEngine {
         } catch {
             fail(.unknown(error))
         }
+    }
+
+    /// frame が visible の右端・下端からはみ出していれば内側へ寄せた原点を返す。
+    /// 寄せた結果が左端・上端を越える場合は左端・上端を優先する。
+    private static func originKeptInside(_ frame: CGRect, visible: CGRect) -> CGPoint {
+        var origin = frame.origin
+        if frame.maxX > visible.maxX {
+            origin.x = visible.maxX - frame.width
+        }
+        if frame.maxY > visible.maxY {
+            origin.y = visible.maxY - frame.height
+        }
+        origin.x = max(origin.x, visible.minX)
+        origin.y = max(origin.y, visible.minY)
+        return origin
     }
 
     private func fail(_ failure: SnapFailure) {
