@@ -1090,20 +1090,20 @@ struct CoordinateConverterTests {
         #expect(ax == CGRect(x: 0, y: 980, width: 200, height: 100))
     }
 
-    @Test func 右側のセカンダリ画面では x はそのまま() {
+    @Test func 右側のセカンダリ画面では_x_はそのまま() {
         let ax = CGRect(x: 1920 + 10, y: 50, width: 300, height: 200)
         let ns = CoordinateConverter.toScreen(ax, primaryHeight: primaryHeight)
         #expect(ns.minX == 1930)
         #expect(ns == CGRect(x: 1930, y: 1080 - 250, width: 300, height: 200))
     }
 
-    @Test func 左側のセカンダリ画面では x が負になる() {
+    @Test func 左側のセカンダリ画面では_x_が負になる() {
         let ax = CGRect(x: -1440, y: 0, width: 100, height: 100)
         let ns = CoordinateConverter.toScreen(ax, primaryHeight: primaryHeight)
         #expect(ns == CGRect(x: -1440, y: 980, width: 100, height: 100))
     }
 
-    @Test func プライマリより上にある画面では AX の y が負になる() {
+    @Test func プライマリより上にある画面では_AX_の_y_が負になる() {
         // プライマリの上に高さ 900 の画面がある。その画面の上端は AX では y = -900。
         let ax = CGRect(x: 0, y: -900, width: 100, height: 100)
         let ns = CoordinateConverter.toScreen(ax, primaryHeight: primaryHeight)
