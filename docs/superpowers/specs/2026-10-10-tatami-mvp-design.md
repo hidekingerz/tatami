@@ -123,6 +123,7 @@ struct CycleMemory: Equatable {
 6. `LayoutCalculator.frame(for:in:)` が `visibleFrame` を分割して目標枠（NS 座標）を返す。
 7. `CoordinateConverter.toAccessibility` で AX 座標へ戻し、`WindowService.setFrame` で適用。
 8. 適用後に `frame(of:)` で実枠を読み直し、`CycleMemory` を更新して保持する。
+   最小サイズ制約で実枠が `visibleFrame` の右端・下端からはみ出した場合は、大きさはそのままに位置だけを内側へ戻す `setFrame` をもう一度行い、読み直した枠を記憶に使う。
 
 ### 3.4 CycleResolver（ハイブリッド判定）
 
@@ -132,7 +133,7 @@ struct CycleMemory: Equatable {
 - 系列が複数の場合、以下をすべて満たせば「記憶の action の次」（末尾なら先頭に戻る）を返す。
   1. 記憶が存在し、`memory.window == window`。
   2. `memory.action` がこのコマンドの系列に含まれる。
-  3. `currentFrame` と `memory.appliedFrame` の各辺（x, y, width, height）の差がすべて 2pt 以内。
+  3. `currentFrame` と `memory.appliedFrame` の原点（x, y）と大きさ（width, height）の差がそれぞれ 2pt 以内。辺そのものの比較ではないので、maxX / maxY は最大 4pt ずれうる。
 - 満たさなければ系列の先頭を返す。
 - 非ループ系の操作後も記憶は更新する（直後にループ系を押せば先頭から始まる）。
 - 記憶はプロセス内メモリのみ。永続化しない。
@@ -185,6 +186,7 @@ struct CycleMemory: Equatable {
 
 - 起動時: `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])` を呼ぶ。未許可ならメニューに誘導項目を表示。
 - ショートカット押下時: `AXIsProcessTrusted()` を毎回呼ぶ（キャッシュしない。許可直後に再起動なしで動くようにするため）。未許可ならプロンプト付きで再要求し、スナップはしない。
+- AX 呼び出しはメインスレッドで同期的に行うため、アプリ要素とウィンドウ要素の両方に `AXUIElementSetMessagingTimeout` で 1 秒の上限を設け、応答しない最前面アプリに tatami が止められないようにする。
 - ウィンドウが取れない（フォーカスウィンドウなし、デスクトップ等）、AX エラー（リサイズ不可のウィンドウ等）: `NSSound.beep()` のみ。ダイアログは出さない。
 - サイズ制約で目標枠にならない: エラー扱いしない。適用後の実枠を `CycleMemory` に保存するので、次回の判定は実枠と比較され、ループは進む。
 - ログ: `os.Logger`、サブシステム `dev.hidekingerz.tatami`。ユーザー向け表示はしない。
@@ -209,17 +211,21 @@ Swift Testing を使う。AX API 本体と SwiftUI はテスト対象外（手�
 ```
 Tatami.xcodeproj
 Tatami/
-  App/        TatamiApp.swift, MenuBarView.swift, SettingsView.swift, ShortcutRegistrar.swift
-  Engine/     SnapEngine.swift, CycleResolver.swift, LayoutCalculator.swift,
-              CoordinateConverter.swift, ScreenLocator.swift
-  Model/      SnapAction.swift, SnapCommand.swift, CycleMemory.swift
-  System/     WindowService.swift, AccessibilityWindowService.swift, PermissionGate.swift
-  Resources/  Info.plist (LSUIElement = YES), Assets.xcassets
+  App/        AppModel.swift, MenuBarView.swift, SettingsView.swift, ShortcutRegistrar.swift,
+              TatamiApp.swift
+  Engine/     CoordinateConverter.swift, CycleResolver.swift, LayoutCalculator.swift,
+              ScreenLocator.swift, SnapEngine.swift
+  Model/      CycleMemory.swift, SnapAction.swift, SnapCommand.swift, WindowHandle.swift
+  System/     AccessibilityWindowService.swift, NSScreenProvider.swift, PermissionChecking.swift,
+              PermissionGate.swift, ScreenProviding.swift, WindowService.swift
+  Resources/  Assets.xcassets
 TatamiTests/
-  LayoutCalculatorTests.swift, CoordinateConverterTests.swift,
-  CycleResolverTests.swift, SnapEngineTests.swift, FakeWindowService.swift
+  CoordinateConverterTests.swift, CycleResolverTests.swift, LayoutCalculatorTests.swift,
+  ScreenLocatorTests.swift, SnapCommandTests.swift, SnapEngineTests.swift
+  Fakes/      FakePermission.swift, FakeScreenProvider.swift, FakeWindowService.swift
 ```
 
+- Info.plist ファイルは置かない。`GENERATE_INFOPLIST_FILE = YES` と `INFOPLIST_KEY_LSUIElement = YES` のビルド設定で生成する（Dock に出さないメニューバー常駐アプリにする）。
 - ビルド構成は Xcode プロジェクト（`.xcodeproj` をコミット）。pbxproj は手書きで作成し、Xcode で開いて保存すれば正規化される。
 - 依存: sindresorhus/KeyboardShortcuts を Xcode の Package Dependencies で追加。`Package.resolved` をコミット。
 - `SnapEngine`、`CycleMemory` の保持、`PermissionGate` は `@MainActor`。

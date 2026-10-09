@@ -33,6 +33,17 @@ xcodebuild -project Tatami.xcodeproj -scheme Tatami -destination 'platform=macOS
 
 Xcode で `Tatami.xcodeproj` を開いて Run しても動きます。
 
+ビルドしたアプリは Xcode の DerivedData 配下（`~/Library/Developer/Xcode/DerivedData/Tatami-*/Build/Products/Debug/Tatami.app`）にできます。
+`/Applications` にコピーして起動すると、アクセシビリティ権限の登録先のパスが固定されます。
+
+## 再ビルド後に動かなくなったら
+
+このプロジェクトはアドホック署名（`CODE_SIGN_IDENTITY = "-"`）でビルドするため、再ビルドすると署名が変わり、macOS がそれまでのアクセシビリティ権限を認めなくなることがあります。
+システム設定では tatami が許可済みのままなのに、ショートカットを押してもビープ音が鳴るだけ、あるいはメニューに「アクセシビリティ権限が必要です…」が出る場合はこれが原因です。
+
+- システム設定 > プライバシーとセキュリティ > アクセシビリティ から tatami を削除（−）し、追加し直してください。
+- 毎回の再登録を避けたい場合は、Xcode で `DEVELOPMENT_TEAM` を設定して自分の開発チームで署名すると、署名が安定します。
+
 ## ライセンス
 
 MIT
