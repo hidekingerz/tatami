@@ -12,7 +12,7 @@ final class PermissionGate: PermissionChecking {
 
     /// システムのプロンプトを出して許可を求める。
     func requestAccess() {
-        // kAXTrustedCheckOptionPrompt is a mutable global (not concurrency-safe in Swift 6); use its literal value.
+        // kAXTrustedCheckOptionPrompt は可変なグローバル変数で Swift 6 では並行安全でないため、その文字列値を直接使う。
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }

@@ -4,7 +4,13 @@ import SwiftUI
 /// アプリのエントリポイント。メニューバー項目と設定ウィンドウの 2 シーンを持つ。
 @main
 struct TatamiApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        let model = AppModel()
+        model.start()
+        _model = State(initialValue: model)
+    }
 
     var body: some Scene {
         MenuBarExtra("tatami", systemImage: "rectangle.split.2x1") {
