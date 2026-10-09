@@ -1,14 +1,17 @@
 // Tatami/App/TatamiApp.swift
 import SwiftUI
 
-/// アプリのエントリポイント。Task 9 でメニューと設定画面を配線する。
+/// アプリのエントリポイント。メニューバー項目と設定ウィンドウの 2 シーンを持つ。
 @main
 struct TatamiApp: App {
+    @State private var model = AppModel()
+
     var body: some Scene {
         MenuBarExtra("tatami", systemImage: "rectangle.split.2x1") {
-            Button("tatami を終了") {
-                NSApp.terminate(nil)
-            }
+            MenuBarView(model: model)
+        }
+        Settings {
+            SettingsView()
         }
     }
 }
