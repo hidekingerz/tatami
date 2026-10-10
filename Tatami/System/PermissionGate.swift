@@ -15,11 +15,18 @@ final class PermissionGate: PermissionChecking {
         AXIsProcessTrusted() || canReachAccessibilityAPI()
     }
 
-    /// システム全体要素への問い合わせが通るか。権限がなければ `.apiDisabled` や `.cannotComplete` で失敗する。
+    /// Dock への AX 問い合わせが通るか。権限がなければ `.apiDisabled` で失敗する。
+    ///
+    /// 対象を Dock にするのは、常に動いていて前面アプリに左右されないため。システム全体要素の
+    /// 「フォーカス中アプリ」は Chromium 系アプリが前面だと断続的に `.noValue` を返して使えない。
+    /// 自プロセスへの問い合わせは権限がなくても通るので判定に使えない（いずれも実機で確認済み）。
     private func canReachAccessibilityAPI() -> Bool {
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else {
+            return false
+        }
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(
-            AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &value
+            AXUIElementCreateApplication(dock.processIdentifier), kAXRoleAttribute as CFString, &value
         )
         return error == .success
     }
