@@ -7,7 +7,9 @@ extension KeyboardShortcuts.Name {
     static let topHalf = Self("topHalf", default: .init(.p, modifiers: [.control, .option]))
     static let bottomHalf = Self("bottomHalf", default: .init(.n, modifiers: [.control, .option]))
     static let maximize = Self("maximize", default: .init(.m, modifiers: [.control, .option]))
-    static let centerThird = Self("centerThird", default: .init(.c, modifiers: [.control, .option]))
+    static let leftThird = Self("leftThird", default: .init(.z, modifiers: [.control, .option]))
+    static let centerThird = Self("centerThird", default: .init(.x, modifiers: [.control, .option]))
+    static let rightThird = Self("rightThird", default: .init(.c, modifiers: [.control, .option]))
 }
 
 extension SnapCommand {
@@ -19,7 +21,9 @@ extension SnapCommand {
         case .topHalf: .topHalf
         case .bottomHalf: .bottomHalf
         case .maximize: .maximize
+        case .leftThird: .leftThird
         case .centerThird: .centerThird
+        case .rightThird: .rightThird
         }
     }
 
@@ -31,12 +35,14 @@ extension SnapCommand {
         case .topHalf: "上半分"
         case .bottomHalf: "下半分"
         case .maximize: "最大化"
+        case .leftThird: "左 1/3"
         case .centerThird: "中央 1/3"
+        case .rightThird: "右 1/3"
         }
     }
 }
 
-/// 6 つのショートカットを SnapEngine に接続する。
+/// すべてのショートカットを SnapEngine に接続する。
 @MainActor
 enum ShortcutRegistrar {
     static func register(engine: SnapEngine) {

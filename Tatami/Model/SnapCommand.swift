@@ -8,7 +8,9 @@ enum SnapCommand: CaseIterable, Sendable {
     case topHalf
     case bottomHalf
     case maximize
+    case leftThird
     case centerThird
+    case rightThird
 
     /// このコマンドが巡る区画の系列。単発系は 1 要素。
     var sequence: [SnapAction] {
@@ -18,7 +20,9 @@ enum SnapCommand: CaseIterable, Sendable {
         case .topHalf: [.topHalf]
         case .bottomHalf: [.bottomHalf]
         case .maximize: [.maximize]
+        case .leftThird: [.leftThird]
         case .centerThird: [.centerThird]
+        case .rightThird: [.rightThird]
         }
     }
 }

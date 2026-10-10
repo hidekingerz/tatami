@@ -10,10 +10,10 @@
 
 MVP の成功条件:
 
-- 下記 6 つのショートカットが、任意のアプリの最前面ウィンドウに対して動作する。
+- 下記 8 つのショートカットが、任意のアプリの最前面ウィンドウに対して動作する。
 - 左右のショートカットは押すごとに「半分 → 1/3 → 2/3」をループする。
 - Accessibility 権限が未許可のとき、ユーザーをシステム設定へ誘導できる。
-- 設定画面で 6 つのショートカットを変更でき、再起動後も保持される。
+- 設定画面で 8 つのショートカットを変更でき、再起動後も保持される。
 - 純粋ロジック（レイアウト計算、座標変換、ループ判定、エンジン）が単体テストで検証されている。
 
 ## 2. 要件
@@ -29,7 +29,9 @@ MVP の成功条件:
 | ⌃⌥p | topHalf | 上半分 |
 | ⌃⌥n | bottomHalf | 下半分 |
 | ⌃⌥m | maximize | 最大化（visibleFrame いっぱい） |
-| ⌃⌥c | centerThird | 中央 1/3 |
+| ⌃⌥z | leftThird | 左 1/3 |
+| ⌃⌥x | centerThird | 中央 1/3 |
+| ⌃⌥c | rightThird | 右 1/3 |
 
 区画（`SnapAction`）は 10 種: leftHalf, rightHalf, topHalf, bottomHalf, maximize,
 leftThird, centerThird, rightThird, leftTwoThirds, rightTwoThirds。
@@ -86,7 +88,7 @@ enum SnapAction: CaseIterable {
 }
 
 enum SnapCommand: CaseIterable {
-    case cycleLeft, cycleRight, topHalf, bottomHalf, maximize, centerThird
+    case cycleLeft, cycleRight, topHalf, bottomHalf, maximize, leftThird, centerThird, rightThird
 
     /// ループ系は複数要素、単発系は 1 要素の系列を返す。
     var sequence: [SnapAction]
@@ -179,7 +181,7 @@ struct CycleMemory: Equatable {
 ### 4.2 設定画面
 
 `Settings` シーン上の `SettingsView`。`KeyboardShortcuts.Recorder` を 6 行並べたフォーム。
-各行はコマンド名（左半分/1/3/2/3 ループ、右半分/1/3/2/3 ループ、上半分、下半分、最大化、中央 1/3）とレコーダー。
+各行はコマンド名（左半分/1/3/2/3 ループ、右半分/1/3/2/3 ループ、上半分、下半分、最大化、左 1/3、中央 1/3、右 1/3）とレコーダー。
 デフォルト値は `KeyboardShortcuts.Name` の `default:` で与える。保存先は KeyboardShortcuts が管理する UserDefaults。
 
 ## 5. 権限とエラー処理
