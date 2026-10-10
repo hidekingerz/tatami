@@ -11,6 +11,7 @@ import Observation
 final class AppModel {
     @ObservationIgnored let permission = PermissionGate()
     @ObservationIgnored let engine: SnapEngine
+    @ObservationIgnored let settings = CommandSettings()
     @ObservationIgnored private var poller: TrustPoller?
 
     /// メニュー表示用の権限状態。通知やポーリングのたびに `refreshTrust()` で読み直す。
@@ -41,7 +42,7 @@ final class AppModel {
     func start() {
         guard ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil else { return }
         permission.requestAccess()
-        ShortcutRegistrar.register(engine: engine)
+        ShortcutRegistrar.register(engine: engine, settings: settings)
         watchTrustUntilGranted()
     }
 
