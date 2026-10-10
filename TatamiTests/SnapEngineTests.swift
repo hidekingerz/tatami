@@ -142,4 +142,18 @@ struct SnapEngineTests {
             Issue.record("noScreen ではなく \(String(describing: captured.first))")
         }
     }
+
+    @Test func 中央に配置は大きさを保ってvisibleFrameの中央に置く() {
+        let engine = makeEngine()
+        engine.perform(.center)
+        // NS: x = 960 - 400 = 560, y = 45 + 505 - 300 = 250 → AX: y = 1080 - (250 + 600) = 230
+        #expect(windows.setFrameCalls == [CGRect(x: 560, y: 230, width: 800, height: 600)])
+    }
+
+    @Test func 高さを最大化は幅を保って縦いっぱいにする() {
+        let engine = makeEngine()
+        engine.perform(.maximizeHeight)
+        // NS: (0, 45, 800, 1010) → AX: y = 1080 - (45 + 1010) = 25
+        #expect(windows.setFrameCalls == [CGRect(x: 0, y: 25, width: 800, height: 1010)])
+    }
 }

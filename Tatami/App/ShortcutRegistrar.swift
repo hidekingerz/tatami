@@ -1,55 +1,71 @@
 // Tatami/App/ShortcutRegistrar.swift
+import AppKit
 import KeyboardShortcuts
 
-extension KeyboardShortcuts.Name {
-    static let cycleLeft = Self("cycleLeft", default: .init(.b, modifiers: [.control, .option]))
-    static let cycleRight = Self("cycleRight", default: .init(.f, modifiers: [.control, .option]))
-    static let topHalf = Self("topHalf", default: .init(.p, modifiers: [.control, .option]))
-    static let bottomHalf = Self("bottomHalf", default: .init(.n, modifiers: [.control, .option]))
-    static let maximize = Self("maximize", default: .init(.m, modifiers: [.control, .option]))
-    static let leftThird = Self("leftThird", default: .init(.z, modifiers: [.control, .option]))
-    static let centerThird = Self("centerThird", default: .init(.x, modifiers: [.control, .option]))
-    static let rightThird = Self("rightThird", default: .init(.c, modifiers: [.control, .option]))
-}
-
 extension SnapCommand {
-    /// KeyboardShortcuts に登録する名前。
-    var shortcutName: KeyboardShortcuts.Name {
+    /// 既定キー。MVP の 8 コマンドだけが持ち、新しいコマンドはユーザーが記録するまでキーなし。
+    var defaultShortcut: KeyboardShortcuts.Shortcut? {
         switch self {
-        case .cycleLeft: .cycleLeft
-        case .cycleRight: .cycleRight
-        case .topHalf: .topHalf
-        case .bottomHalf: .bottomHalf
-        case .maximize: .maximize
-        case .leftThird: .leftThird
-        case .centerThird: .centerThird
-        case .rightThird: .rightThird
+        case .cycleLeft: .init(.b, modifiers: [.control, .option])
+        case .cycleRight: .init(.f, modifiers: [.control, .option])
+        case .topHalf: .init(.p, modifiers: [.control, .option])
+        case .bottomHalf: .init(.n, modifiers: [.control, .option])
+        case .maximize: .init(.m, modifiers: [.control, .option])
+        case .leftThird: .init(.z, modifiers: [.control, .option])
+        case .centerThird: .init(.x, modifiers: [.control, .option])
+        case .rightThird: .init(.c, modifiers: [.control, .option])
+        default: nil
         }
     }
 
-    /// 設定画面に表示するラベル。
-    var title: String {
-        switch self {
-        case .cycleLeft: "左半分 / 左 1/3 / 左 2/3"
-        case .cycleRight: "右半分 / 右 1/3 / 右 2/3"
-        case .topHalf: "上半分"
-        case .bottomHalf: "下半分"
-        case .maximize: "最大化"
-        case .leftThird: "左 1/3"
-        case .centerThird: "中央 1/3"
-        case .rightThird: "右 1/3"
-        }
+    /// KeyboardShortcuts に登録する名前。rawValue をそのまま使うので、MVP からのキー割当を引き継ぐ。
+    @MainActor
+    var shortcutName: KeyboardShortcuts.Name {
+        ShortcutNames.name(for: self)
     }
 }
 
-/// すべてのショートカットを SnapEngine に接続する。
+/// `KeyboardShortcuts.Name` をコマンドごとに 1 度だけ作るためのキャッシュ。
+@MainActor
+private enum ShortcutNames {
+    private static var cache: [SnapCommand: KeyboardShortcuts.Name] = [:]
+
+    static func name(for command: SnapCommand) -> KeyboardShortcuts.Name {
+        if let cached = cache[command] {
+            return cached
+        }
+        let name = KeyboardShortcuts.Name(command.rawValue, default: command.defaultShortcut)
+        cache[command] = name
+        return name
+    }
+}
+
+/// すべてのショートカットを SnapEngine に接続し、有効/無効をホットキーの登録に反映する。
 @MainActor
 enum ShortcutRegistrar {
-    static func register(engine: SnapEngine) {
+    /// 全コマンドのハンドラを登録し、有効/無効をホットキーに反映する。
+    /// Carbon のホットキーは名前ではなくキーの組み合わせ単位で登録され、同じキーを持つ名前のハンドラは全部呼ばれる。
+    /// そのため無効コマンドのキーが有効コマンドと同じ場合に備え、ハンドラ側で無効を弾く。
+    static func register(engine: SnapEngine, settings: CommandSettings) {
         for command in SnapCommand.allCases {
             KeyboardShortcuts.onKeyDown(for: command.shortcutName) {
+                guard settings.isEnabled(command) else { return }
                 engine.perform(command)
             }
         }
+        apply(settings: settings)
+        settings.onChange = { _, _ in
+            apply(settings: settings)
+        }
+    }
+
+    /// 有効状態をホットキーの登録に合わせ直す。
+    /// 先に無効コマンドの名前を解除し、そのあと有効コマンドの名前を登録し直す。
+    /// 解除はキー自体を外してしまうので、有効コマンドが同じキーを持っていても再登録で復活させる。
+    /// `enable` は登録済みなら何もせず、キー未割当の名前も無視される。
+    static func apply(settings: CommandSettings) {
+        let disabled = SnapCommand.allCases.filter { !settings.isEnabled($0) }
+        KeyboardShortcuts.disable(disabled.map(\.shortcutName))
+        KeyboardShortcuts.enable(settings.enabledCommands.map(\.shortcutName))
     }
 }

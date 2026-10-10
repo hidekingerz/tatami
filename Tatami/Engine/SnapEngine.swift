@@ -59,7 +59,7 @@ final class SnapEngine {
             let action = CycleResolver.resolve(
                 command: command, memory: memory, window: window, currentFrame: currentAX
             )
-            let targetNS = LayoutCalculator.frame(for: action, in: region.visibleFrame)
+            let targetNS = LayoutCalculator.frame(for: action, in: region.visibleFrame, current: currentNS)
             let targetAX = CoordinateConverter.toAccessibility(targetNS, primaryHeight: primaryHeight)
 
             try windowService.setFrame(targetAX, of: window)
