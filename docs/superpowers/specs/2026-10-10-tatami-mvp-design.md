@@ -195,7 +195,13 @@ struct CycleMemory: Equatable {
 
 ## 6. ショートカットの衝突について
 
-- KeyboardShortcuts は Carbon `RegisterEventHotKey` を使う。同じ組み合わせを複数アプリが登録した場合、イベントは一方にしか届かない（先に登録したアプリが優先されると理解している。実装時に実機で確認し、結果をこの節に追記する）。
+- KeyboardShortcuts は Carbon `RegisterEventHotKey` を使う。同じ組み合わせを複数アプリが登録した場合、イベントは一方にしか届かない。
+- 実機での確認結果（2026-10-10、macOS 26）。⌃⌥b を登録する最小の CLI プログラム（`docs/superpowers/plans/2026-10-10-tatami-mvp.md` Task 9 Step 9）と tatami を組み合わせて 3 通り試した。
+  - tatami を先に起動し、後から CLI を登録: tatami が受け取り、CLI には届かない。
+  - CLI を先に登録し、後から tatami を起動: tatami が受け取り、CLI には届かない。
+  - CLI 単独: CLI が受け取る（CLI 自体は受信できる）。
+  - つまり登録順では決まらない。この組み合わせでは常に tatami（バンドルされた GUI アプリ）が優先された。どちらが優先されるかの規則は macOS 側の実装に依存し、公開仕様はない。GUI アプリ同士の競合は未検証。
+- 利用者への指針: 他のアプリでショートカットが効かなくなった、または tatami が効かない場合は、どちらかの設定画面でキーを変える。tatami 側は設定画面から変更できる。
 - システム標準ショートカットは Carbon ホットキーより優先される。⌃⌥ + p/n/b/f/m/c はシステム標準では未使用。
 - `KeyboardShortcuts.Recorder` はシステム予約キーと自アプリのメニュー項目との衝突を録音時に警告する。他社アプリとの衝突は検出不可。対処は設定画面でのキー変更。
 
