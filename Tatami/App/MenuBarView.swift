@@ -2,23 +2,12 @@
 import SwiftUI
 
 /// メニューバー項目をクリックしたときのメニュー。
-/// 権限状態は AppModel の観測対象の値を読み、メニューを開くたびにも読み直して古い表示を正す。
+/// 権限状態は AppModel の観測対象の値を読む（更新は AppModel 側のポーリングと通知が担う）。
 struct MenuBarView: View {
     let model: AppModel
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Group {
-            content
-        }
-        .onAppear {
-            // Group の修飾子は子ごとに効くので複数回呼ばれうるが、refreshTrust は冪等。
-            model.refreshTrust()
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
         if !model.isTrusted {
             Button("アクセシビリティ権限が必要です…") {
                 model.permission.openSystemSettings()
