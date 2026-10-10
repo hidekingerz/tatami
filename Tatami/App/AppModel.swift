@@ -27,8 +27,8 @@ final class AppModel {
         )
         isTrusted = permission.isTrusted
 
-        // アクセシビリティ権限が変わると TCC がこの分散通知を投げる（届けば即時に反映できる）。
-        // ただし実機では届かないことがあるため、未許可の間は start() のポーリングが本命。
+        // アクセシビリティ権限が変わると TCC がこの分散通知を投げる。ただし通知が届いた時点では
+        // TCC がまだ古い判定を返すことがあるため、未許可の間は start() のポーリングが本命。
         DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("com.apple.accessibility.api"), object: nil, queue: .main
         ) { [weak self] _ in
@@ -48,18 +48,21 @@ final class AppModel {
     /// 許可されるまで 1 秒おきに権限を読み直す。許可を検知したらメニュー表示を更新して止まる。
     private func watchTrustUntilGranted() {
         let poller = TrustPoller(permission: permission) { [weak self] in
-            self?.refreshTrust()
             self?.poller = nil
+            self?.refreshTrust()
         }
         self.poller = poller
         poller.start()
     }
 
-    /// 権限状態を OS から読み直す。
+    /// 権限状態を OS から読み直す。取り消されていたら、再び許可されるまでのポーリングを始める。
     func refreshTrust() {
         let trusted = permission.isTrusted
         if trusted != isTrusted {
             isTrusted = trusted
+        }
+        if !trusted, poller == nil {
+            watchTrustUntilGranted()
         }
     }
 }

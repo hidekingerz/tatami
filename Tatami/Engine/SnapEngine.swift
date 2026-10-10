@@ -99,7 +99,7 @@ final class SnapEngine {
     }
 
     private func fail(_ failure: SnapFailure) {
-        logger.error("snap failed: \(String(describing: failure))")
+        logger.error("snap failed: \(String(describing: failure), privacy: .public)")
         onFailure(failure)
     }
 }
