@@ -38,6 +38,17 @@ Xcode で `Tatami.xcodeproj` を開いて Run しても動きます。
 ビルドしたアプリは Xcode の DerivedData 配下（`~/Library/Developer/Xcode/DerivedData/Tatami-*/Build/Products/Debug/Tatami.app`）にできます。
 `/Applications` にコピーして起動すると、アクセシビリティ権限の登録先のパスが固定されます。
 
+### 「xcodebuild requires Xcode」と言われたら
+
+`xcode-select` の向き先が Command Line Tools になっています。Xcode を入れる前に Command Line Tools を入れていると（Homebrew が自動で入れるケースを含む）この状態になります。Xcode 本体へ切り替えてください。
+
+```sh
+xcode-select -p   # /Library/Developer/CommandLineTools なら要切り替え
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+```
+
+切り替えても Command Line Tools は残り、Homebrew などはそのまま動きます。
+
 ## 署名とアクセシビリティ権限
 
 macOS はアクセシビリティ権限をアプリの署名に紐づけて保存します。署名が証明書ベースなら再ビルドしても権限は引き継がれますが、アドホック署名（`CODE_SIGN_IDENTITY = "-"`）ではビルドごとに署名が変わり、システム設定では許可済みのままなのに動かない状態になります。
@@ -62,6 +73,20 @@ Apple の中間証明書（WWDR G3）がキーチェーンにありません。[
 curl -O https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
 security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
 security find-identity -v -p codesigning   # 1 valid identities found になれば OK
+```
+
+### 署名時に「errSecInternalComponent」が出たら
+
+SSH でログインしたシェルからビルドしている場合に出ます。SSH セッションではログインキーチェーンがロックされたままで、`codesign` が秘密鍵の使用許可を得られません（証明書や設定の問題ではなく、Mac の前で開いたターミナルや Xcode からは同じコマンドが通ります）。ビルド前に同じシェルでキーチェーンをアンロックしてください。
+
+```sh
+security unlock-keychain ~/Library/Keychains/login.keychain-db
+```
+
+SSH で入り直すたびに必要です。毎回入力したくない場合は、署名鍵を `codesign` から確認なしで使えるようにしておけます。
+
+```sh
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "<ログインパスワード>" ~/Library/Keychains/login.keychain-db
 ```
 
 ## ライセンス
