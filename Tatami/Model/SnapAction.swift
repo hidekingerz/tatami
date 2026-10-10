@@ -31,4 +31,8 @@ enum SnapAction: CaseIterable, Sendable {
     case bottomLeftSixth
     case bottomCenterSixth
     case bottomRightSixth
+    // サイズ系（現在枠に依存する）
+    case maximizeHeight
+    case maximizeWidth
+    case center
 }

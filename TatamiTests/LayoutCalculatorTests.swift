@@ -130,4 +130,51 @@ struct LayoutCalculatorTests {
             }
         }
     }
+
+    @Test func 高さを最大化は幅とxを保って縦いっぱいにする() {
+        let frame = LayoutCalculator.frame(for: .maximizeHeight, in: screen, current: window)
+        #expect(frame == CGRect(x: 100, y: 0, width: 400, height: 700))
+    }
+
+    @Test func 幅を最大化は高さとyを保って横いっぱいにする() {
+        let frame = LayoutCalculator.frame(for: .maximizeWidth, in: screen, current: window)
+        #expect(frame == CGRect(x: 0, y: 100, width: 1000, height: 300))
+    }
+
+    @Test func 中央に配置は大きさを保って画面中央に置く() {
+        let frame = LayoutCalculator.frame(for: .center, in: screen, current: window)
+        #expect(frame == CGRect(x: 300, y: 200, width: 400, height: 300))
+    }
+
+    @Test func 中央に配置の端数は切り捨てる_原点オフセット付き() {
+        // offsetScreen の中心は (-720, 462.5)。幅 400・高さ 300 なら x = -920, y = 312.5 → 312。
+        let frame = LayoutCalculator.frame(for: .center, in: offsetScreen, current: window)
+        #expect(frame == CGRect(x: -920, y: 312, width: 400, height: 300))
+    }
+
+    @Test func 現在枠が画面より大きければ縮める() {
+        let huge = CGRect(x: -50, y: -50, width: 1200, height: 900)
+        #expect(LayoutCalculator.frame(for: .center, in: screen, current: huge) == screen)
+        #expect(LayoutCalculator.frame(for: .maximizeHeight, in: screen, current: huge) == screen)
+        #expect(LayoutCalculator.frame(for: .maximizeWidth, in: screen, current: huge) == screen)
+    }
+
+    @Test func 高さを最大化で右にはみ出すなら内側へ寄せる() {
+        let nearRightEdge = CGRect(x: 800, y: 100, width: 400, height: 300)
+        let frame = LayoutCalculator.frame(for: .maximizeHeight, in: screen, current: nearRightEdge)
+        #expect(frame == CGRect(x: 600, y: 0, width: 400, height: 700))
+    }
+
+    @Test func 幅を最大化で上にはみ出すなら内側へ寄せる() {
+        let nearTop = CGRect(x: 100, y: 600, width: 400, height: 300)
+        let frame = LayoutCalculator.frame(for: .maximizeWidth, in: screen, current: nearTop)
+        #expect(frame == CGRect(x: 0, y: 400, width: 1000, height: 300))
+    }
+
+    @Test(arguments: SnapAction.allCases)
+    func 現在枠が画面外にあっても全区画が画面内に収まる(action: SnapAction) {
+        let outside = CGRect(x: 5000, y: -3000, width: 1600, height: 1200)
+        let frame = LayoutCalculator.frame(for: action, in: offsetScreen, current: outside)
+        #expect(offsetScreen.contains(frame), "\(action) が画面外にはみ出している: \(frame)")
+    }
 }

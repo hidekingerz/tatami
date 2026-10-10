@@ -43,7 +43,28 @@ enum LayoutCalculator {
         case .bottomLeftSixth: return cell(column: 0, of: 3, row: 0, of: 2, in: visible)
         case .bottomCenterSixth: return cell(column: 1, of: 3, row: 0, of: 2, in: visible)
         case .bottomRightSixth: return cell(column: 2, of: 3, row: 0, of: 2, in: visible)
+
+        case .maximizeHeight:
+            let width = min(current.width, visible.width)
+            return keptInside(CGRect(x: current.minX, y: visible.minY, width: width, height: visible.height), in: visible)
+        case .maximizeWidth:
+            let height = min(current.height, visible.height)
+            return keptInside(CGRect(x: visible.minX, y: current.minY, width: visible.width, height: height), in: visible)
+        case .center:
+            let size = CGSize(width: min(current.width, visible.width), height: min(current.height, visible.height))
+            let origin = CGPoint(x: (visible.midX - size.width / 2).rounded(.down),
+                                 y: (visible.midY - size.height / 2).rounded(.down))
+            return keptInside(CGRect(origin: origin, size: size), in: visible)
         }
+    }
+
+    /// frame が visible からはみ出していれば、大きさはそのままに原点を内側へ寄せる。
+    /// frame の大きさは visible 以下である前提。
+    private static func keptInside(_ frame: CGRect, in visible: CGRect) -> CGRect {
+        var origin = frame.origin
+        origin.x = min(max(origin.x, visible.minX), visible.maxX - frame.width)
+        origin.y = min(max(origin.y, visible.minY), visible.maxY - frame.height)
+        return CGRect(origin: origin, size: frame.size)
     }
 
     /// visible を columns 列 × rows 行に等分したときのセル。
