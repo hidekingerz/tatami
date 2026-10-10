@@ -24,20 +24,7 @@ extension SnapCommand {
         case .leftThird: .leftThird
         case .centerThird: .centerThird
         case .rightThird: .rightThird
-        }
-    }
-
-    /// 設定画面に表示するラベル。
-    var title: String {
-        switch self {
-        case .cycleLeft: "左半分 / 左 1/3 / 左 2/3"
-        case .cycleRight: "右半分 / 右 1/3 / 右 2/3"
-        case .topHalf: "上半分"
-        case .bottomHalf: "下半分"
-        case .maximize: "最大化"
-        case .leftThird: "左 1/3"
-        case .centerThird: "中央 1/3"
-        case .rightThird: "右 1/3"
+        default: KeyboardShortcuts.Name(rawValue)
         }
     }
 }
