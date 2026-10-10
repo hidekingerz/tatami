@@ -228,10 +228,10 @@ enum ShortcutRegistrar {
 ### 4.3 RegionGlyph（新設）
 
 - 24 × 15 pt の画面を表す角丸の枠線と、その中の区画を塗った小さな図。
-- 区画の形は `LayoutCalculator.frame(for: action, in: unit, current: sample)` で得る。
-  `unit` は `CGRect(x: 0, y: 0, width: 1, height: 1)`。サイズ系には代表的な現在枠
-  （中央に置いた 0.5 × 0.6 の矩形）を渡し、「高さを最大化」なら縦長、「幅を最大化」なら横長、
-  「中央に配置」なら中央の矩形として描かれる。
+- 区画の形は `LayoutCalculator.frame(for: action, in: reference, current: sample)` を基準画面の大きさで割って 0...1 に正規化して得る。
+  `reference` は `CGRect(x: 0, y: 0, width: 1200, height: 600)`（LayoutCalculator は幅を floor するので、2・3・4 で割り切れる大きさにする）。
+  サイズ系には代表的な現在枠 `sample = CGRect(x: 300, y: 120, width: 600, height: 360)` を渡し、
+  「高さを最大化」なら縦長、「幅を最大化」なら横長、「中央に配置」なら中央の矩形として描かれる。
 - NS 座標（左下原点）で得た枠を描画時に上下反転する。
 - ループ系は系列の先頭の区画を描き、名前の横に ⟳ を添える（グリフ自体には重ねない）。
 - 塗りは `.accentColor`、枠線は `.secondary`。無効時は両方 `.tertiary`。
