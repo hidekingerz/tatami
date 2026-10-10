@@ -36,13 +36,31 @@ Xcode で `Tatami.xcodeproj` を開いて Run しても動きます。
 ビルドしたアプリは Xcode の DerivedData 配下（`~/Library/Developer/Xcode/DerivedData/Tatami-*/Build/Products/Debug/Tatami.app`）にできます。
 `/Applications` にコピーして起動すると、アクセシビリティ権限の登録先のパスが固定されます。
 
-## 再ビルド後に動かなくなったら
+## 署名とアクセシビリティ権限
 
-このプロジェクトはアドホック署名（`CODE_SIGN_IDENTITY = "-"`）でビルドするため、再ビルドすると署名が変わり、macOS がそれまでのアクセシビリティ権限を認めなくなることがあります。
-システム設定では tatami が許可済みのままなのに、ショートカットを押してもビープ音が鳴るだけ、あるいはメニューに「アクセシビリティ権限が必要です…」が出る場合はこれが原因です。
+macOS はアクセシビリティ権限をアプリの署名に紐づけて保存します。署名が証明書ベースなら再ビルドしても権限は引き継がれますが、アドホック署名（`CODE_SIGN_IDENTITY = "-"`）ではビルドごとに署名が変わり、システム設定では許可済みのままなのに動かない状態になります。
 
-- システム設定 > プライバシーとセキュリティ > アクセシビリティ から tatami を削除（−）し、追加し直してください。
-- 毎回の再登録を避けたい場合は、Xcode で `DEVELOPMENT_TEAM` を設定して自分の開発チームで署名すると、署名が安定します。
+このプロジェクトは `Apple Development` 証明書で署名する設定（`CODE_SIGN_STYLE = Automatic`、`DEVELOPMENT_TEAM` 指定）になっています。自分の環境でビルドする場合は、Xcode > Settings > Accounts に Apple ID を追加し（無料の Personal Team で可）、`Tatami.xcodeproj` の `DEVELOPMENT_TEAM` を自分のチーム ID に書き換えてください。証明書を用意しない場合は `CODE_SIGN_IDENTITY = "-"` に戻してアドホック署名でビルドできます。
+
+### 権限が効かなくなったら
+
+ショートカットを押してもビープ音が鳴るだけ、あるいはメニューに「アクセシビリティ権限が必要です…」が出続ける場合は、古い署名に紐づいた権限エントリが残っています。次のコマンドでエントリを消し、tatami を起動し直して許可し直してください。
+
+```sh
+tccutil reset Accessibility dev.hidekingerz.tatami
+```
+
+システム設定 > プライバシーとセキュリティ > アクセシビリティ で tatami を削除（−）して追加し直しても同じです。
+
+### 署名時に「unable to build chain to self-signed root」が出たら
+
+Apple の中間証明書（WWDR G3）がキーチェーンにありません。[Apple PKI](https://www.apple.com/certificateauthority/) から `AppleWWDRCAG3.cer` を取得してログインキーチェーンに追加してください。
+
+```sh
+curl -O https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
+security find-identity -v -p codesigning   # 1 valid identities found になれば OK
+```
 
 ## ライセンス
 
