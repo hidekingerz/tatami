@@ -20,7 +20,9 @@ Snap macOS windows into place with keyboard shortcuts.
 | ⌃⌥p | 上半分 |
 | ⌃⌥n | 下半分 |
 | ⌃⌥m | 最大化 |
-| ⌃⌥c | 中央 1/3 |
+| ⌃⌥z | 左 1/3 |
+| ⌃⌥x | 中央 1/3 |
+| ⌃⌥c | 右 1/3 |
 
 ## ビルド
 
