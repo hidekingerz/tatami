@@ -43,27 +43,29 @@ private enum ShortcutNames {
 /// すべてのショートカットを SnapEngine に接続し、有効/無効をホットキーの登録に反映する。
 @MainActor
 enum ShortcutRegistrar {
-    /// 全コマンドのハンドラを登録し、無効なものはホットキーを解除する。
-    /// `onKeyDown` はキーが割り当て済みならその場で登録するので、解除はその直後に行う。
+    /// 全コマンドのハンドラを登録し、有効/無効をホットキーに反映する。
+    /// Carbon のホットキーは名前ではなくキーの組み合わせ単位で登録され、同じキーを持つ名前のハンドラは全部呼ばれる。
+    /// そのため無効コマンドのキーが有効コマンドと同じ場合に備え、ハンドラ側で無効を弾く。
     static func register(engine: SnapEngine, settings: CommandSettings) {
         for command in SnapCommand.allCases {
             KeyboardShortcuts.onKeyDown(for: command.shortcutName) {
+                guard settings.isEnabled(command) else { return }
                 engine.perform(command)
             }
         }
-        let disabled = SnapCommand.allCases.filter { !settings.isEnabled($0) }
-        KeyboardShortcuts.disable(disabled.map(\.shortcutName))
-        settings.onChange = { command, enabled in
-            setEnabled(enabled, for: command)
+        apply(settings: settings)
+        settings.onChange = { _, _ in
+            apply(settings: settings)
         }
     }
 
-    /// 有効ならホットキーを登録し、無効なら解除する。キーが未割当なら KeyboardShortcuts 側で何もしない。
-    static func setEnabled(_ enabled: Bool, for command: SnapCommand) {
-        if enabled {
-            KeyboardShortcuts.enable(command.shortcutName)
-        } else {
-            KeyboardShortcuts.disable(command.shortcutName)
-        }
+    /// 有効状態をホットキーの登録に合わせ直す。
+    /// 先に無効コマンドの名前を解除し、そのあと有効コマンドの名前を登録し直す。
+    /// 解除はキー自体を外してしまうので、有効コマンドが同じキーを持っていても再登録で復活させる。
+    /// `enable` は登録済みなら何もせず、キー未割当の名前も無視される。
+    static func apply(settings: CommandSettings) {
+        let disabled = SnapCommand.allCases.filter { !settings.isEnabled($0) }
+        KeyboardShortcuts.disable(disabled.map(\.shortcutName))
+        KeyboardShortcuts.enable(settings.enabledCommands.map(\.shortcutName))
     }
 }

@@ -63,7 +63,8 @@ extension RegionGlyph {
         }
         let action = category.commands[0].sequence[0]
         let renderer = ImageRenderer(content: RegionGlyph(action: action))
-        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        // ディスプレイ間の移動で解像度が変わっても十分な固定 2 倍。
+        renderer.scale = 2
         let image = renderer.nsImage ?? NSImage(size: NSSize(width: 24, height: 15))
         image.isTemplate = true
         tabImages[category] = image

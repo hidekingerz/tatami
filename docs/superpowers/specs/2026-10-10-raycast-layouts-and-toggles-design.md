@@ -27,8 +27,8 @@ Raycast の Window Management にある区画系・サイズ系の配置を tata
 
 | カテゴリ | コマンド (rawValue) | 系列 | 既定キー | 既定で有効 |
 |---|---|---|---|---|
-| 半分 | 左半分 ⟳ (`cycleLeft`) | leftHalf → leftThird → leftTwoThirds | ⌃⌥b | ○ |
-| 半分 | 右半分 ⟳ (`cycleRight`) | rightHalf → rightThird → rightTwoThirds | ⌃⌥f | ○ |
+| 半分 | 左半分 → 左 1/3 → 左 2/3 ⟳ (`cycleLeft`) | leftHalf → leftThird → leftTwoThirds | ⌃⌥b | ○ |
+| 半分 | 右半分 → 右 1/3 → 右 2/3 ⟳ (`cycleRight`) | rightHalf → rightThird → rightTwoThirds | ⌃⌥f | ○ |
 | 半分 | 上半分 (`topHalf`) | topHalf | ⌃⌥p | ○ |
 | 半分 | 下半分 (`bottomHalf`) | bottomHalf | ⌃⌥n | ○ |
 | 1/3 | 左 1/3 (`leftThird`) | leftThird | ⌃⌥z | ○ |

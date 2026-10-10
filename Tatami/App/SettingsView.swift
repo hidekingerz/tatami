@@ -75,10 +75,12 @@ struct CommandRow: View {
 
             Text(command.isCycle ? "\(command.title) ⟳" : command.title)
                 .foregroundStyle(isOn ? .primary : .secondary)
+                .accessibilityHidden(true)
 
             Spacer()
 
             KeyboardShortcuts.Recorder(for: command.shortcutName)
+                .accessibilityLabel(command.title)
                 .disabled(!isOn)
         }
     }
