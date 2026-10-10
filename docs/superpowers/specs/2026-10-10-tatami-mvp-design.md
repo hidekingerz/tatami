@@ -29,9 +29,9 @@ MVP の成功条件:
 | ⌃⌥p | topHalf | 上半分 |
 | ⌃⌥n | bottomHalf | 下半分 |
 | ⌃⌥m | maximize | 最大化（visibleFrame いっぱい） |
-| ⌃⌥z | leftThird | 左 1/3 |
-| ⌃⌥x | centerThird | 中央 1/3 |
-| ⌃⌥c | rightThird | 右 1/3 |
+| ⌥z | leftThird | 左 1/3 |
+| ⌥x | centerThird | 中央 1/3 |
+| ⌥c | rightThird | 右 1/3 |
 
 区画（`SnapAction`）は 10 種: leftHalf, rightHalf, topHalf, bottomHalf, maximize,
 leftThird, centerThird, rightThird, leftTwoThirds, rightTwoThirds。
@@ -204,7 +204,7 @@ struct CycleMemory: Equatable {
   - CLI 単独: CLI が受け取る（CLI 自体は受信できる）。
   - つまり登録順では決まらない。この組み合わせでは常に tatami（バンドルされた GUI アプリ）が優先された。どちらが優先されるかの規則は macOS 側の実装に依存し、公開仕様はない。GUI アプリ同士の競合は未検証。
 - 利用者への指針: 他のアプリでショートカットが効かなくなった、または tatami が効かない場合は、どちらかの設定画面でキーを変える。tatami 側は設定画面から変更できる。
-- システム標準ショートカットは Carbon ホットキーより優先される。⌃⌥ + p/n/b/f/m/c はシステム標準では未使用。
+- システム標準ショートカットは Carbon ホットキーより優先される。⌃⌥ + p/n/b/f/m と ⌥ + z/x/c はシステム標準では未使用。ただし ⌥ + 英字は特殊文字の入力に使われるキーなので、tatami 起動中はその入力ができなくなる。不便なら設定画面でキーを変える。
 - `KeyboardShortcuts.Recorder` はシステム予約キーと自アプリのメニュー項目との衝突を録音時に警告する。他社アプリとの衝突は検出不可。対処は設定画面でのキー変更。
 
 ## 7. テスト
