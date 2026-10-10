@@ -7,9 +7,9 @@ extension KeyboardShortcuts.Name {
     static let topHalf = Self("topHalf", default: .init(.p, modifiers: [.control, .option]))
     static let bottomHalf = Self("bottomHalf", default: .init(.n, modifiers: [.control, .option]))
     static let maximize = Self("maximize", default: .init(.m, modifiers: [.control, .option]))
-    static let leftThird = Self("leftThird", default: .init(.z, modifiers: [.option]))
-    static let centerThird = Self("centerThird", default: .init(.x, modifiers: [.option]))
-    static let rightThird = Self("rightThird", default: .init(.c, modifiers: [.option]))
+    static let leftThird = Self("leftThird", default: .init(.z, modifiers: [.control, .option]))
+    static let centerThird = Self("centerThird", default: .init(.x, modifiers: [.control, .option]))
+    static let rightThird = Self("rightThird", default: .init(.c, modifiers: [.control, .option]))
 }
 
 extension SnapCommand {

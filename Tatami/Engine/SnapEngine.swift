@@ -75,7 +75,9 @@ final class SnapEngine {
             }
 
             memory = CycleMemory(window: window, action: action, appliedFrame: appliedAX)
-            logger.debug("\(String(describing: action)) -> \(String(describing: appliedAX))")
+            logger.debug(
+                "\(String(describing: command), privacy: .public) -> \(String(describing: action), privacy: .public) target=\(String(describing: targetAX), privacy: .public) applied=\(String(describing: appliedAX), privacy: .public)"
+            )
         } catch let error as WindowServiceError {
             fail(.window(error))
         } catch {
