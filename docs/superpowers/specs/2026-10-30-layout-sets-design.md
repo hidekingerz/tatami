@@ -319,7 +319,7 @@ struct WindowPlacer {
 @MainActor
 protocol SpaceMoving {
     /// window を「デスクトップ desktop へ切り替え」のショートカットで運ぶ。window は表示中のデスクトップにあり前面に出ていること。
-    func move(_ window: WindowHandle, frameAX: CGRect, toDesktop desktop: Int) throws
+    func move(_ window: WindowHandle, frameAX: CGRect, toDesktop desktop: Int) async throws
 }
 
 enum SpaceMoveError: Error { case shortcutDisabled(desktop: Int), eventPostFailed }
@@ -369,14 +369,17 @@ final class LayoutSetRunner {
          spaceMover: any SpaceMoving, permission: any PermissionChecking,
          onFinished: @MainActor (LayoutRunResult) -> Void)
     var isRunning: Bool
-    func apply(_ set: LayoutSet) async
+    /// 実行中・権限なしなら何もせず false を返す（呼び出し側が beep する）。
+    func apply(_ set: LayoutSet) async -> Bool
 }
 
 struct LayoutRunResult: Sendable {
     let set: LayoutSet
     let placed: [LayoutRow]
-    let skipped: [(row: LayoutRow, reason: SkipReason)]
-    let failed: [(row: LayoutRow, error: any Error)]
+    let skipped: [SkippedRow]          // (row, reason)
+    let failed: [FailedRow]            // (row, error)
+    let skippedDesktopMoves: Bool      // 自動並べ替えがオンでデスクトップ移動を飛ばした
+    var summary: String                // HUD の文言（§2.5）
 }
 ```
 
