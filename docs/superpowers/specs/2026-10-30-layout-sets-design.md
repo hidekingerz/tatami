@@ -88,27 +88,44 @@ LayoutRow
 
 ### 2.4 適用の挙動
 
-1. ピッカーを閉じる（ピッカーから呼ばれた場合）。
+macOS は「いまデスクトップ何番か」「この窓はデスクトップ何番か」を公開 API で教えてくれない。
+そこで Runner は実行中だけ `currentDesktop: Int?`（tatami が信じている現在の番号）を持ち、
+`NSWorkspace.activeSpaceDidChangeNotification` を実行の間ずっと購読して、自分が起こした切替以外の切替が起きたら nil に戻す。
+これで「すでに目的のデスクトップにある窓を掴んで ⌃N を送り、切り替わらずに 1 秒待って失敗にする」無駄をなくす。
+
+1. ピッカーが開いていれば閉じる（どの経路で呼ばれても）。
 2. 行を上から順に処理する。`action` と `desktop` がともに nil の行は無視する。それ以外の行ごとに:
    1. `bundleIdentifier` が一致する起動中の通常アプリを探す。なければ「起動していない」として飛ばす。
    2. そのアプリの窓（最小化を含む、全デスクトップ）から、`titleFilter` に合い、フルスクリーンでなく、まだ他の行に使っていないものを選ぶ。
       候補が複数あれば §3.4 の並び（いまのデスクトップで見えている窓を前面順に、そのあとに残り）で最初のもの。
       起動しているが合う窓がなければ「合う窓がない」、合う窓がフルスクリーンだけなら「フルスクリーン」として飛ばす。
-   3. 最小化されていれば戻す。
+   3. 最小化されていれば戻す。アプリが隠されていれば（⌘H）`unhide` する。
    4. `desktop` がない行は窓を `AXRaise` するだけで、アプリはアクティブにしない（アプリ切替を行数分起こさないため。
       別デスクトップにある窓でも `setFrame` は効くので、その場では切り替えずに配置する）。
-   5. `desktop` がある行はアプリをアクティブにして窓を raise し、§5 の手順でそのデスクトップへ移す。
-      移動の成否は §5 のとおり検知し、失敗は「失敗」として記録する。移動に失敗しても手順 6 の配置は行う（少なくとも並ぶことを優先する）。
+   5. `desktop` が N の行:
+      1. N が `unreachableDesktops`（この実行で「切り替わらなかった」番号）に入っていれば、移動を試みず「デスクトップ N へ切り替わりませんでした」を記録して 6 へ。
+      2. `currentDesktop != N` なら、何も掴まずに ⌃N だけを送って利用者を N へ移す（§5 の `switchTo`）。切替の通知が来れば `currentDesktop = N`。
+         来なければ「すでに N にいる」か「N が存在しない」かは分からないので、仮に `currentDesktop = N` とする。
+      3. アプリをアクティブにして窓を raise し、窓がいまのデスクトップに見えるまで待つ（§5 手順 3）。
+         activate が別デスクトップへの切替を起こすと通知が来て `currentDesktop` は nil になる。
+      4. 見えていて `currentDesktop == N` なら、窓はもう N にある。移動しない（成功）。
+      5. 見えていて `currentDesktop == nil` なら、§5 の `move` でタイトルバーを掴んで ⌃N を送る。成功すれば `currentDesktop = N`。
+         `spaceDidNotChange(N)` なら N を `unreachableDesktops` に入れる（存在しない番号で行ごとに 1 秒掴み続けない）。
+      6. 見えなければ `windowNotOnScreen` として「失敗」。
+      失敗しても手順 6 の配置は行う（少なくとも並ぶことを優先する）。
    6. `action` があれば、窓がいまある画面の visibleFrame で `LayoutCalculator.frame(for:in:current:)` を計算し、
       既存の SnapEngine と同じ補正（最小サイズではみ出したら内側へ寄せる）をかけて適用する。
-3. 全行が終わったら結果を表示する（§2.5）。最後に `desktop` を処理した行の窓が前面に残り、利用者はそのデスクトップにいる。
+3. 全行が終わったら、`desktop` のある行があれば最後に処理したその行のアプリを、なければ最初に配置した行のアプリを 1 回だけアクティブにする。
+   これでキーボードフォーカスが見えている窓に移る（raise だけでは元のアプリにフォーカスが残り、打鍵が見えない窓へ入る）。
+4. 結果を表示する（§2.5）。
 
 - 1 行の失敗（AX エラー、§5 の各種失敗）はその行を「失敗」として記録し、次の行へ進む。全体を中断しない。
-  1 つの行が「配置した」と「移動に失敗した」の両方を持つことがある。
-- 適用中は「適用中…」の HUD を出し、終わったら結果の HUD に置き換える。
+  1 行につき記録する失敗は最初の 1 つだけ。1 つの行が「配置した」と「移動に失敗した」の両方を持つことがある。
+- 適用中は「適用中…」の HUD を出し（マウスイベントは通す。掴む点のヒットテストに HUD が当たらないように）、終わったら結果の HUD に置き換える。
 - アクセシビリティ権限がなければ、既存コマンドと同じく権限を要求して何もしない。
 - 適用中は同じセットの再適用を受け付けない（二重に走らせない）。別のセットや単発コマンドも、適用中は無視して beep する。
 - 既存の `CycleMemory`（ループ系の記憶）は適用の最後にクリアする。配置が変わったあとに古い記憶でループが続くのを避ける。
+- `bundleIdentifier` が通常アプリでない（`activationPolicy != .regular`）行は「起動していないか、通常のアプリではありません」と出す。
 
 ### 2.5 結果の表示
 
@@ -282,7 +299,8 @@ protocol WindowEnumerating {
 @MainActor
 protocol WindowService {   // 既存に追加
     func unminimize(_ window: WindowHandle) throws
-    func raise(_ window: WindowHandle) throws      // アプリの activate + AXRaise
+    func raise(_ window: WindowHandle) throws      // kAXMainAttribute = true + AXRaise。アプリはアクティブにしない
+    func activate(_ window: WindowHandle) throws   // その窓のアプリを unhide して activate する
 }
 ```
 
@@ -348,6 +366,10 @@ struct WindowPlacer {
 ```swift
 @MainActor
 protocol SpaceMoving {
+    /// activeSpaceDidChangeNotification が来るたびに増える。Runner は raise の前後で比べ、自分以外の切替を検知する。
+    var spaceChangeCount: Int { get }
+    /// 何も掴まずに「デスクトップ desktop へ切り替え」のキーだけを送る。切替の通知が来れば true。
+    func switchTo(desktop: Int) async throws -> Bool
     /// window を「デスクトップ desktop へ切り替え」のショートカットで運ぶ。
     /// 呼び出し側は raise 済みであること。move 自身が「いまのデスクトップに見えている」「掴む点の直下がその窓」を確かめてから掴む。
     func move(_ window: WindowHandle, toDesktop desktop: Int) async throws
@@ -429,6 +451,7 @@ struct LayoutRunResult: Sendable {
 ```
 
 - §2.4 の順で進める。`onStarted` は「適用中…」の HUD 用。
+- 実行中の状態 `currentDesktop: Int?` と `unreachableDesktops: Set<Int>` は `apply` のローカルに持ち、実行をまたいで残さない。
 - `async` にするのは §5 の待ちのため。AX 呼び出し自体はメインアクターで行う。
 - `windows(ofBundleIdentifier:)` が nil（起動していない）なら `windowsByBundle` にキーを入れず、`[]`（窓なし）ならキーを入れて空配列にする。
   起動しているが窓のないアプリに「起動していません」と出さないため。
@@ -483,6 +506,14 @@ enum ShortcutRegistrar {
   `level = .floating`、`collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]`
   （どのデスクトップでも出る、フルスクリーン空間の上にも出せてその空間を離れない、Mission Control に出ない）。
   フォーカスを失ったら閉じる。
+- 開くときに前面だったアプリ（`NSWorkspace.shared.frontmostApplication`）を覚え、閉じるとき（esc、フォーカス喪失、適用）にそれをアクティブに戻す。
+  メニューバーアプリは窓を閉じてもアクティブなままなので、戻さないと既存コマンドが beep し続ける。
+  tatami 自身のアクティブ化は `NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)` を使う（グローバルキーからの `NSApp.activate()` は拒否されることがある）。
+- キー操作（↑↓ / ⏎ / esc / → / ← / ⌘⏎）は検索欄が first responder でも効く必要がある。フィールドエディタが先に消費するので
+  `NSPanel.keyDown` の上書きでは届かない。SwiftUI の `.onKeyPress` を検索欄を含むルートに付けるか、`NSEvent.addLocalMonitorForEvents(matching: .keyDown)` で拾う。
+- ⌘⏎ で設定画面を開く経路は、ピッカーが `App` のシーン外にあるため `@Environment(\.openSettings)` が直接使えない。
+  `MenuBarView` が表示されたときに `openSettings` を `AppModel` に預ける方法と、`NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)` の
+  2 案を実装し、実機で動く方を採る（前者はメニューを一度も開いていないと使えない）。
 - 中身は SwiftUI（`NSHostingView`）。見た目はモックに従う。アクセント色は `Color.accentColor`。
   行のグリフは `RegionGlyph` を拡張し、複数の区画を 1 枚に重ねて描けるようにする（`RegionGlyph(actions: [SnapAction])`）。
 - 選択中の行は塗りつぶし、未選択は透明。デスクトップ番号は枠線のバッジ、キーは角丸の小さなラベル、未割当なら「未割当」。
@@ -511,7 +542,8 @@ enum ShortcutRegistrar {
 
 - 中央下（下端から 120 pt）に出る角丸のパネル。文言は §2.5。文字数に応じて 2〜4 秒で消える。クリックで即閉じる。
   適用中は「<セット名> を適用中…」を出し、終了時に結果へ置き換える。再表示のときは前の消去タイマーを止める。
-- `NSPanel`、`level = .statusBar`、`ignoresMouseEvents = false`、`collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]`。
+- `NSPanel`、`level = .statusBar`、`collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]`。
+  `ignoresMouseEvents` は結果表示では false（クリックで閉じる）、「適用中…」では true（掴む点のヒットテストに当たらない）。
 
 ## 5. スペース間移動の仕組み
 
@@ -520,42 +552,62 @@ enum ShortcutRegistrar {
 この操作は、成功すれば目的の窓を運ぶが、失敗の仕方によっては**無関係な窓を運んでしまう**（掴んだ点に別の窓があった場合）。
 そのため `move` は「掴む前に目的の窓がそこにあること」を必ず確かめ、確かめられなければ掴まない。
 
-手順（`SpaceMover.move(_:toDesktop:)`。呼び出し側はアプリをアクティブにして窓を raise 済み）:
+`SpaceMover` は生成時から `NSWorkspace.shared.notificationCenter` の `activeSpaceDidChangeNotification` を購読し、
+来るたびに `spaceChangeCount` を増やす。切替の「待ち」はこのカウンタがキー送信時点の値より増えるのを待つ形にし、
+送信前に届いていた通知（activate が起こした切替の遅れた通知など）を「切り替わった」と誤認しない。
+
+**`switchTo(desktop:)`**（何も掴まずに利用者だけ移す）:
+
+1. キーを読む。nil なら `shortcutDisabled`。
+2. 修飾キーが離されるまで待つ（下の手順 2 と同じ）。
+3. `spaceChangeCount` を控え、`keyDown` → `keyUp` を送る。
+4. カウンタが増えるのを `spaceChangeTimeout` まで待つ。増えれば `afterSpaceChange` 待って true、増えなければ false（例外にしない。
+   「すでにそこ」と「存在しない」は区別できず、どちらも呼び出し側が扱う）。
+
+**`move(_:toDesktop:)`**（呼び出し側はアプリをアクティブにして窓を raise 済み）:
 
 1. `MissionControlShortcuts` から「デスクトップ N へ切り替え」のキーを読む。nil なら `shortcutDisabled`。
 2. 修飾キー（control / option / shift / command）が離されるまで待つ（`CGEventSource.flagsState(.combinedSessionState)` を 20 ms 間隔で、上限 1 秒）。
    超えたら `modifiersHeld`。押したまま ⌃N を送ると ⌃⌥N になり何も起きないため、黙って進まない。
+   利用者が物理的にマウスボタンを押している（`CGEventSource.buttonState(.combinedSessionState, button: .left)`）間も同様に待ち、超えたら `interrupted`。
 3. 窓がいまのデスクトップに見えるまで待つ（`WindowEnumerating.isOnScreen` を 20 ms 間隔で、上限 1 秒。
    raise によるデスクトップ切替や最小化復帰のアニメーションが終わるのを待つ）。超えたら `windowNotOnScreen`。
 4. 窓の現在枠を読み直し、掴む点の候補を順に試す: (a) `minX + 80, minY + 10`（信号機の右）、(b) `midX, minY + 10`（タイトルバー中央）、
-   (c) `maxX - 40, minY + 10`（右端）、(d) `midX, minY + 3`（最上端の帯。タブ付きブラウザの空き）。
-   各候補で `AXUIElementCopyElementAtPosition(systemWide, x, y)` を取り、その要素の `kAXWindowAttribute` が目的の窓と一致し、
-   かつ要素の `kAXRoleAttribute` が操作部品（`AXButton`, `AXTab`, `AXRadioButton`, `AXTextField`, `AXPopUpButton`, `AXMenuButton`, `AXCheckBox`, `AXSlider`）
-   でない最初の候補を採る。どれも通らなければ `noGrabPoint`（窓は動かさない）。
+   (c) `maxX - 40, minY + 10`（右端）、(d) `midX, minY + 6`（上端の帯。タブ付きブラウザの空き。3 pt だとリサイズ領域に掛かる）。
+   各候補で `AXUIElementCopyElementAtPosition(systemWide, x, y)` を取り、要素の `kAXRoleAttribute` が `AXWindow` ならその要素自身を、
+   それ以外なら `kAXWindowAttribute` を目的の窓と `CFEqual` で比べる。一致し、かつロールが**許可リスト**
+   （`AXWindow`, `AXGroup`, `AXToolbar`, `AXStaticText`, `AXTabGroup`, `AXWebArea`, `AXUnknown`、および `kAXRoleAttribute` が読めない要素）に入る最初の候補を採る。
+   拒否リストではなく許可リストにするのは、距離 0 の down/up が本物のクリックになる経路があり、漏れがそのまま事故になるため。
+   どれも通らなければ `noGrabPoint`（窓は動かさない）。
 5. いまのマウス位置を保存する。
-6. `NSWorkspace.activeSpaceDidChangeNotification` の購読を始める。
-7. `CGEvent` で掴む点へ `mouseMoved` → `leftMouseDown` を送る（`.cghidEventTap`）。`dragOffset` が 0 でなければ続けて
+6. `CGEvent` で掴む点へ `mouseMoved` → `leftMouseDown` を送る（`.cghidEventTap`）。`dragOffset` が 0 でなければ続けて
    `leftMouseDragged` を掴む点 + `(dragOffset, 0)` へ送る（ドラッグ閾値を越えないと移動を始めないアプリ向け。既定 0、スパイクで決める）。
-8. `afterMouseDown`（既定 80 ms）待つ。その間に実マウスが掴む点から 10 pt 以上離れていたら `interrupted`。
-9. 読んだキーで `keyDown` → `keyUp` を送る（修飾キーは `flags` に立てる）。
-10. 6 の通知を待つ（上限 `spaceChangeTimeout`、既定 1 秒）。来なければ `spaceDidNotChange(desktop:)`（存在しない番号、またはすでにそのデスクトップ）。
-    来たらさらに `afterSpaceChange`（既定 150 ms）待つ。
-11. `leftMouseUp` を送る。
-12. マウス位置を 5 の位置へ戻す（`CGWarpMouseCursorPosition`）。
-13. 窓が新しいデスクトップで見えているか `isOnScreen` で確かめる（上限 500 ms）。見えなければ `windowLeftBehind`。
+7. `afterMouseDown`（既定 80 ms）待つ。その間に実マウスが掴む点から 10 pt 以上離れていたら `interrupted`。
+8. `spaceChangeCount` を控え、読んだキーで `keyDown` → `keyUp` を送る（修飾キーは `flags` に立てる）。
+9. カウンタが増えるのを `spaceChangeTimeout`（既定 1 秒）まで待つ。増えなければ `spaceDidNotChange(desktop:)`。
+   増えたらさらに `afterSpaceChange`（既定 150 ms）待つ。
+10. `leftMouseUp` を送る。
+11. マウス位置を 5 の位置へ戻す（`CGWarpMouseCursorPosition`）。
+12. 窓が新しいデスクトップで見えているか `isOnScreen` で確かめる（上限 500 ms）。見えなければ `windowLeftBehind`。
 
-- 7 以降で例外が出たら必ず `leftMouseUp` を送ってから投げる（押しっぱなしにしない）。`defer` で行う。
+- 6 以降で例外が出たら必ず `leftMouseUp` を送り、マウス位置を戻してから投げる（押しっぱなし・カーソル置き去りにしない）。`defer` で行う。
+- 通知待ちは `withThrowingTaskGroup` で「カウンタの監視」と「タイムアウト」を競走させる。`CheckedContinuation` を通知とタイムアウトの両方から
+  resume する形は二重 resume の事故が起きやすいので使わない。
 - 待ち時間と `dragOffset` は `SpaceMoverTiming` にまとめ、スパイク（§8）の結果で既定値を決める。
 - `spaceDidNotChange` のとき窓はいまのデスクトップに残る。続く区画の適用はそこで行う（§2.4 手順 5）。
-- 呼び出し側（Runner）は `desktop` のある行で `NSRunningApplication.activate()` → `raise` のあと `move` を呼ぶ。
+- 呼び出し側（Runner）は §2.4 手順 5 のとおり、`switchTo` → `activate` → `raise` → 見えているか → 必要なときだけ `move`。
   macOS 14 以降の協調アクティベーションで activate が拒否されることがあるが、その場合は手順 3 で `windowNotOnScreen` になり、
   無関係な窓を掴むことはない。
+- 同じアプリに同じ枠の窓が 2 枚あり（両方最大化など）目的の窓が別デスクトップにある場合、`isOnScreen` が真でもヒットテストが別の窓に当たり
+  `noGrabPoint` になる。安全だが原因は伝わらない。README に既知の制約として書く。
 
 ## 6. エラー処理と互換性
 
 - 既存ユーザーには `layoutSets.v1` がないので空で起動する。既存の設定・キーには触らない。
 - `SnapAction` の `Codable` 追加はケース名で保存する。将来の改名は保存互換を壊すので、改名するときは移行を書く。
-- セット適用中のショートカットは無視して beep する。ピッカーが開いているときの単発コマンドは通常どおり動く。
+- セット適用中のショートカットは無視して beep する。ピッカーが開いている（tatami が前面の）ときの単発コマンドも beep する（§2.3）。
+  ピッカーを閉じるときは開く前に前面だったアプリをアクティブに戻すので、閉じた直後から単発コマンドは従来どおり動く。
+- セキュア入力中（パスワード欄にフォーカス、ターミナルの Secure Keyboard Entry）は合成キーが届かず `spaceDidNotChange` になる。README に書く。
 - `SpaceMover` が投げた行は「失敗」として HUD に出すが、区画の配置は行ってから次の行へ進む。
 - アクセシビリティ権限が途中で取り消された場合、AX 呼び出しが失敗して行が「失敗」になる。既存と同じく beep し、権限メニューが出る。
 
@@ -569,8 +621,8 @@ enum ShortcutRegistrar {
 | RegionMatcherTests | 27 区画ちょうどの枠がその区画になる。少しずれた枠（IoU 0.95）も同じ区画。自由サイズ（IoU 0.5）は nil。サイズ系 3 つは候補に出ない。 |
 | MissionControlShortcutsTests | 固定の辞書から、有効な 118 → ⌃1 のキーコードと修飾キーを得る。`enabled = false` → nil。項目なし → nil。119〜127 → デスクトップ 2〜10。 |
 | WindowPlacerTests | 既存 SnapEngineTests の配置部分を移し、`FakeWindowService` で中央に配置・はみ出し補正が従来どおり。 |
-| LayoutSetRunnerTests | Fake の enumerator / windowService / spaceMover / placer / dockPreferences で、2 行成功 1 行 skip の結果。デスクトップありの行で activate + spaceMover が呼ばれ、なしの行では raise だけ。spaceMover が投げたら failed に入るが配置は行い、次の行へ進む。自動並べ替えがオンなら spaceMover が一度も呼ばれず `skippedDesktopMoves` が立つ。両方 nil の行は照合されず件数にも入らない。起動しているが窓のないアプリは「合う窓がない」。`onStarted` が最初に呼ばれる。 |
-| SpaceMoverTests | 掴む点の候補（純粋関数）が 4 点で正しい座標。幅 200 未満では (a) と (c) を外す。 |
+| LayoutSetRunnerTests | Fake の enumerator / windowService / spaceMover / placer / dockPreferences で、2 行成功 1 行 skip の結果。デスクトップありの行で switchTo + activate が呼ばれ、なしの行では raise だけ。raise 後に見えていて切替が起きていなければ move を呼ばない（同じデスクトップに 2 行あるセットで move が 0 回）。activate で切替が起きた（カウンタが増えた）行は move を呼ぶ。move が `spaceDidNotChange` を投げたら同じ番号の残りの行は move を呼ばずに失敗にする。move が投げても配置は行い、次の行へ進む。自動並べ替えがオンなら switchTo も move も呼ばれず `skippedDesktopMoves` が立つ。両方 nil の行は照合されず件数にも入らない。起動しているが窓のないアプリは「合う窓がない」。`onStarted` が最初に呼ばれ、終わりに activate が 1 回だけ呼ばれる。 |
+| SpaceMoverTests | 掴む点の候補（純粋関数）が 4 点で正しい座標。幅 200 未満では (a) と (c) を外す。許可リストに AXWindow が入り AXButton が入らない。 |
 | DockPreferencesTests | 値なし → true。false が保存されていれば false。（書き込みと Dock 再起動はテストしない） |
 | LayoutCaptureTests | Fake の onScreenWindows から行ができる。titleFilter は常に空。 |
 | SnapEngineTests / 既存 | 変更なしで通る。 |
@@ -598,13 +650,19 @@ tatami 本体のメニューに、`defaults write dev.hidekingerz.tatami debugMe
 5. いまのデスクトップで、目的の窓と同じ位置に別アプリの窓を置いた状態で、別デスクトップの窓を対象にする → 別アプリの窓が動かないこと（§5 の検証が効くこと）。
 6. フルスクリーンのアプリの上でピッカーと HUD が出て、その空間を離れないこと。
 7. WezTerm の `window_decorations` の値を記録する。`RESIZE`（タイトルバーなし）なら掴めないので README に書く。
+8. `activate` でデスクトップが切り替わった直後（通知が届いた直後）に掴んで ⌃N を送っても窓が付いてくるか。
+   付いてこなければ `afterSpaceChange` を raise 後にも置く。
+9. 「すでにそのデスクトップにある窓」を含むセット（連絡の 3 行のうち 1 行だけ持ち出した状態）で、掴む操作が 1 回だけ起きること。
+10. ピッカーの ↑↓ / ⏎ / esc が検索欄にフォーカスがある状態で効くこと。⌘⏎ で設定が開くこと（§4.1 の 2 案のどちらで動いたかを記録）。
 
 これらが崩れた場合は設計に戻る。特に 1 が全滅なら、スペース移動を落として「いまのデスクトップで並べるだけ」に縮める判断を利用者に仰ぐ。
 
 ## 9. 付随作業
 
 - README に「レイアウトセット」の節を足す: 作り方、ピッカー、デスクトップ移動の仕組みと制約
-  （Mission Control ショートカットをオンにする、複数ディスプレイは対象外、存在しない番号は無視される）。
+  （Mission Control ショートカットをオンにする、番号は Mission Control の並びの通し番号で複数ディスプレイは対象外、
+  存在しない番号は「切り替わりませんでした」になる、セキュア入力中は移動できない、同じ枠の窓が 2 枚あると掴めないことがある、
+  タイトルバーのないアプリは移動できない）。
 - 設定画面のウィンドウ幅の変更を既存の実機確認項目に反映する。
 
 ## 10. ビルダーに委ねること

@@ -33,7 +33,7 @@
 2. **壊れた保存データ（手で編集した JSON、将来の形式）**: 空で起動し、元データを退避キーに残し、再保存で上書きしないこと（Task 4 `LayoutSetStoreTests` の「壊れた JSON は退避して空で起動」で検証）。
 3. **掴む点に目的の窓がない（raise が拒否された、アニメーション中、同じ位置に別アプリの窓がある）**: 無関係な窓を運ばず、その行を失敗にして次へ進むこと（Task 2 `SpaceMover` の事前確認と確認表 #5、Task 7 `LayoutSetRunnerTests` の「spaceMover が投げたら failed に入るが配置は行い次の行へ進む」と `summary` の文言テストで検証）。
 4. **「いまの配置を保存」で区画に当てはまらない自由サイズの窓**: `action = nil` の行として残り、適用では触らないこと（Task 8 `RegionMatcherTests` の「自由サイズは nil」、Task 5 の「何もしない行は照合されない」で検証）。
-5. **tatami 自身が前面のときの単発コマンド**: ピッカーや設定画面を区画に置かず beep すること（Task 9 の実機確認項目。ハンドラ側の判定なので単体テストは書かない）。
+5. **同じデスクトップへ運ぶ行が複数あるセット（連絡の 3 行）で、すでにそこにある窓**: 掴む操作を起こさず、失敗にもせず、1 秒待たないこと（Task 7 `LayoutSetRunnerTests` の「すでにそのデスクトップにある窓は掴まない」「同じ番号への切替は 1 回だけ」で検証）。tatami 自身が前面のときの単発コマンドが beep することは Task 9 の実機確認項目。
 
 ---
 
@@ -293,7 +293,7 @@ OS に依存する部分をまとめて作り、フラグ付きのデバッグ�
   // WindowService に追加
   func unminimize(_ window: WindowHandle) throws       // kAXMinimizedAttribute = false
   func raise(_ window: WindowHandle) throws            // kAXMainAttribute = true、kAXRaiseAction（アプリはアクティブにしない）
-  func activate(_ window: WindowHandle) throws         // その窓のアプリを NSRunningApplication.activate() する
+  func activate(_ window: WindowHandle) throws         // その窓のアプリを unhide() してから activate(options: .activateIgnoringOtherApps) する
 
   enum SpaceMoveError: Error, Equatable, Sendable {
       case shortcutDisabled(desktop: Int)
@@ -319,6 +319,10 @@ OS に依存する部分をまとめて作り、フラグ付きのデバッグ�
 
   @MainActor
   protocol SpaceMoving {
+      /// activeSpaceDidChangeNotification が来るたびに増える。Runner は raise の前後で比べて、自分以外の切替を検知する。
+      var spaceChangeCount: Int { get }
+      /// 何も掴まずにキーだけ送り、切替の通知が来れば true。来なければ false（例外にしない）。
+      func switchTo(desktop: Int) async throws -> Bool
       /// 呼び出し側は activate + raise 済み。move 自身が「見えている」「掴む点の直下がこの窓」を確かめてから掴む。
       func move(_ window: WindowHandle, toDesktop desktop: Int) async throws
   }
@@ -326,11 +330,11 @@ OS に依存する部分をまとめて作り、フラグ付きのデバッグ�
   @MainActor
   final class CGEventSpaceMover: SpaceMoving {
       init(shortcuts: any MissionControlShortcutReading, enumerator: any WindowEnumerating,
-           timing: SpaceMoverTiming = SpaceMoverTiming())
-      /// 掴む点の候補（順に試す）。(a) minX+80,minY+10 (b) midX,minY+10 (c) maxX-40,minY+10 (d) midX,minY+3。幅 200 未満なら (a)(c) を外す。
+           windowService: any WindowService, timing: SpaceMoverTiming = SpaceMoverTiming())
+      /// 掴む点の候補（順に試す）。(a) minX+80,minY+10 (b) midX,minY+10 (c) maxX-40,minY+10 (d) midX,minY+6。幅 200 未満なら (a)(c) を外す。
       static func grabCandidates(for frameAX: CGRect) -> [CGPoint]
-      /// 掴んではいけない AX ロール。
-      static let controlRoles: Set<String>   // AXButton, AXTab, AXRadioButton, AXTextField, AXPopUpButton, AXMenuButton, AXCheckBox, AXSlider
+      /// 掴んでよい AX ロール（許可リスト）。ロールが読めない要素も許可する。
+      static let allowedRoles: Set<String>   // AXWindow, AXGroup, AXToolbar, AXStaticText, AXTabGroup, AXWebArea, AXUnknown
   }
 
   // テスト用
@@ -360,20 +364,21 @@ struct SpaceMoverTests {
     @Test func 掴む点の候補は4点() {
         let frame = CGRect(x: 100, y: 50, width: 800, height: 600)
         #expect(CGEventSpaceMover.grabCandidates(for: frame) == [
-            CGPoint(x: 180, y: 60), CGPoint(x: 500, y: 60), CGPoint(x: 860, y: 60), CGPoint(x: 500, y: 53),
+            CGPoint(x: 180, y: 60), CGPoint(x: 500, y: 60), CGPoint(x: 860, y: 60), CGPoint(x: 500, y: 56),
         ])
     }
 
     @Test func 幅が狭ければ端の候補を外す() {
         let frame = CGRect(x: 100, y: 50, width: 150, height: 600)
-        #expect(CGEventSpaceMover.grabCandidates(for: frame) == [CGPoint(x: 175, y: 60), CGPoint(x: 175, y: 53)])
+        #expect(CGEventSpaceMover.grabCandidates(for: frame) == [CGPoint(x: 175, y: 60), CGPoint(x: 175, y: 56)])
     }
 
-    @Test func 操作部品のロールを掴まない() {
-        #expect(CGEventSpaceMover.controlRoles.contains("AXButton"))
-        #expect(CGEventSpaceMover.controlRoles.contains("AXTab"))
-        #expect(!CGEventSpaceMover.controlRoles.contains("AXWindow"))
-        #expect(!CGEventSpaceMover.controlRoles.contains("AXGroup"))
+    @Test func 掴んでよいロールは許可リスト() {
+        #expect(CGEventSpaceMover.allowedRoles.contains("AXWindow"))
+        #expect(CGEventSpaceMover.allowedRoles.contains("AXGroup"))
+        #expect(!CGEventSpaceMover.allowedRoles.contains("AXButton"))
+        #expect(!CGEventSpaceMover.allowedRoles.contains("AXTab"))
+        #expect(!CGEventSpaceMover.allowedRoles.contains("AXComboBox"))
     }
 }
 ```
@@ -402,30 +407,41 @@ struct SpaceMoverTests {
 
 - [ ] **Step 4: SpaceMover を書く**
 
-`Tatami/System/SpaceMover.swift`: Interfaces のとおり。`move` の手順（設計書 §5）:
+`Tatami/System/SpaceMover.swift`: Interfaces のとおり（設計書 §5）。
+
+`init` で `NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main)` を登録し、来るたびに `spaceChangeCount += 1`。
+切替待ちの共通関数 `waitForSpaceChange(since count: Int, timeout: Duration) async -> Bool`: `withThrowingTaskGroup` で「`spaceChangeCount > count` になるまで `pollInterval` ずつ待つタスク」と「`timeout` だけ寝るタスク」を競走させ、先に終わった方で true / false を返す。`CheckedContinuation` は使わない。
+
+`switchTo(desktop:)`:
 
 1. `shortcuts.switchToDesktopShortcut(desktop)` が nil なら `shortcutDisabled(desktop:)`。
-2. 修飾キーが離されるまで待つ: `CGEventSource.flagsState(.combinedSessionState)` に control / option / shift / command が立っている間 `pollInterval` ずつ `Task.sleep`。`modifierReleaseTimeout` を超えたら `modifiersHeld`。
-3. `enumerator.isOnScreen(window)` が true になるまで `pollInterval` ずつ待つ。`onScreenTimeout` を超えたら `windowNotOnScreen`。
-4. `windowService.frame(of: window)` を読み直し（`AccessibilityWindowService` を直接使ってよい）、`grabCandidates(for:)` を順に `AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), x, y)` でヒットテストする。要素の `kAXWindowAttribute` が `window` と等しく（`CFEqual`）、`kAXRoleAttribute` が `controlRoles` に含まれない最初の点を掴む点にする。なければ `noGrabPoint`。
-5. `CGEvent(source: nil)?.location` でマウス位置を保存。
-6. `NSWorkspace.shared.notificationCenter` で `NSWorkspace.activeSpaceDidChangeNotification` を購読し、`AsyncStream` か `CheckedContinuation` で待てるようにする。
-7. 掴む点へ `mouseMoved` → `leftMouseDown` を `CGEvent(mouseEventSource:mouseType:mouseCursorPosition:mouseButton:)` で作り `post(tap: .cghidEventTap)`。作れなければ `eventPostFailed`。`dragOffset != 0` なら続けて `leftMouseDragged` を `(x + dragOffset, y)` へ。
-8. `afterMouseDown` 待つ。待ったあと `CGEvent(source: nil)?.location` が掴む点から 10 pt 以上離れていれば `interrupted`。
-9. `CGEvent(keyboardEventSource:virtualKey:keyDown:)` で keyDown / keyUp を作り、`flags = combo.modifiers` を立てて post。
-10. 6 の通知を `spaceChangeTimeout` まで待つ。来なければ `spaceDidNotChange(desktop:)`。来たら `afterSpaceChange` 待つ。
-11. `leftMouseUp` を同じ点に post。
-12. `CGWarpMouseCursorPosition` で 5 の位置へ戻す。
-13. `isOnScreen(window)` が true になるまで `leftBehindTimeout` 待つ。ならなければ `windowLeftBehind`。
+2. 修飾キーの解放待ち（下の `move` 手順 2 と同じ関数）。
+3. `let before = spaceChangeCount`。`CGEvent(keyboardEventSource:virtualKey:keyDown:)` で keyDown / keyUp を作り、`flags = combo.modifiers` を立てて post。
+4. `waitForSpaceChange(since: before, timeout: spaceChangeTimeout)`。true なら `afterSpaceChange` 待って true を返す。false ならそのまま false。
 
-7 以降で例外になった場合も `leftMouseUp` を必ず post してから投げる（`defer` で押しっぱなしを防ぐ）。待ち時間と `dragOffset` は `SpaceMoverTiming` にまとめ、スパイクで既定値を決める。
+`move(_:toDesktop:)`:
+
+1. `shortcuts.switchToDesktopShortcut(desktop)` が nil なら `shortcutDisabled(desktop:)`。
+2. 修飾キーが離されるまで待つ: `CGEventSource.flagsState(.combinedSessionState)` に control / option / shift / command が立っている間 `pollInterval` ずつ `Task.sleep`。`modifierReleaseTimeout` を超えたら `modifiersHeld`。同じループで `CGEventSource.buttonState(.combinedSessionState, button: .left)` が true の間も待ち、超えたら `interrupted`。
+3. `enumerator.isOnScreen(window)` が true になるまで `pollInterval` ずつ待つ。`onScreenTimeout` を超えたら `windowNotOnScreen`。
+4. `windowService.frame(of: window)` を読み直し、`grabCandidates(for:)` を順に `AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(x), Float(y), &element)` でヒットテストする。要素の `kAXRoleAttribute` を読み、`"AXWindow"` なら要素自身を、それ以外なら `kAXWindowAttribute` を `window.element` と `CFEqual` で比べる。一致し、かつロールが `allowedRoles` に入る（またはロールが読めない）最初の点を掴む点にする。なければ `noGrabPoint`。
+5. `CGEvent(source: nil)?.location` でマウス位置を保存。ここから `defer { leftMouseUp を post; CGWarpMouseCursorPosition(保存位置) }`。
+6. 掴む点へ `mouseMoved` → `leftMouseDown` を `CGEvent(mouseEventSource:mouseType:mouseCursorPosition:mouseButton:)` で作り `post(tap: .cghidEventTap)`。作れなければ `eventPostFailed`。`dragOffset != 0` なら続けて `leftMouseDragged` を `(x + dragOffset, y)` へ。
+7. `afterMouseDown` 待つ。待ったあと `CGEvent(source: nil)?.location` が掴む点から 10 pt 以上離れていれば `interrupted`。
+8. `let before = spaceChangeCount`。keyDown / keyUp を post。
+9. `waitForSpaceChange(since: before, timeout: spaceChangeTimeout)` が false なら `spaceDidNotChange(desktop:)`。true なら `afterSpaceChange` 待つ。
+10. `leftMouseUp` を同じ点に post し、`CGWarpMouseCursorPosition` で 5 の位置へ戻す（正常経路。`defer` の二重 mouseUp は無害だが、フラグで 1 回にしてよい）。
+11. `isOnScreen(window)` が true になるまで `leftBehindTimeout` 待つ。ならなければ `windowLeftBehind`。
+
+待ち時間と `dragOffset` は `SpaceMoverTiming` にまとめ、スパイクで既定値を決める。
 
 - [ ] **Step 5: デバッグメニューを足す**
 
 `Tatami/App/DebugMenu.swift`: `UserDefaults.standard.bool(forKey: "debugMenu")` が true のときだけ `MenuBarView` に出る `Menu("デバッグ")`。項目:
 
-- 「最前面の窓をデスクトップ N へ」（N = 1...5 のサブメニュー）: 3 秒待ってから（利用者が対象アプリへ切り替える時間）、`AccessibilityWindowService().focusedWindow()` → `CGEventSpaceMover(shortcuts: MissionControlShortcuts(), enumerator: AccessibilityWindowEnumerator()).move(_:toDesktop:)`。選ばれた候補点（何番目か）と結果（成功 / `SpaceMoveError` のどれか）を `Logger(subsystem: "dev.hidekingerz.tatami", category: "Debug")` に `.public` で出す。
+- 「最前面の窓をデスクトップ N へ」（N = 1...5 のサブメニュー）: 3 秒待ってから（利用者が対象アプリへ切り替える時間）、`AccessibilityWindowService().focusedWindow()` → `CGEventSpaceMover(shortcuts: MissionControlShortcuts(), enumerator: AccessibilityWindowEnumerator(), windowService: AccessibilityWindowService()).move(_:toDesktop:)`。選ばれた候補点（何番目か）と結果（成功 / `SpaceMoveError` のどれか）を `Logger(subsystem: "dev.hidekingerz.tatami", category: "Debug")` に `.public` で出す。
 - 「同上（leftMouseDragged あり）」: `SpaceMoverTiming(dragOffset: 2)` で同じこと。
+- 「デスクトップ N へ切り替えるだけ」（N = 1...5）: `switchTo(desktop:)` を呼び、戻り値と `spaceChangeCount` をログ。
 - 「最前面アプリの窓一覧をログ」: 3 秒待ってから、最前面アプリの bundle id で `AccessibilityWindowEnumerator().windows(ofBundleIdentifier:)` を呼び、各窓の title / frameAX / isMinimized / isFullScreen をログに出し、一覧を記憶する。
 - 「記憶した窓の 2 枚目を activate + raise（3 秒後）」: 3 秒待ってから、記憶した一覧の 2 枚目（別デスクトップに置いた窓を想定）を `activate` → `raise` し、1 秒後に `isOnScreen` の結果をログ。
 - 「画面に見えている窓をログ」: `onScreenWindows()` を即時にログ。
@@ -476,6 +492,8 @@ WezTerm は `window_decorations` の設定値も報告してもらう（`RESIZE`
 | 7 | 「Mission Control / Dock の設定をログ」 | デスクトップ 1〜3 のキーが出る（⌃1 = keyCode 18 など）、4〜10 は nil、mru-spaces の値が設定どおり | 共通 | | | | | | |
 | 8 | 1 を、ホットキーのつもりで ⌃⌥ を押したままメニューを選び、2 秒以上押し続ける | 動かず、ログは `modifiersHeld` | 共通 | | | | | | |
 | 9 | 存在しないデスクトップ 5 へ | 動かず、ログは `spaceDidNotChange` | 共通 | | | | | | |
+| 10 | デスクトップ 1 で「デスクトップ 2 へ切り替えるだけ」→ もう一度「デスクトップ 2 へ切り替えるだけ」 | 1 回目は true、2 回目は false（すでにそこ）。カウンタは 1 回目だけ増える | 共通 | | | | | | |
+| 11 | デスクトップ 1 で、デスクトップ 2 に窓のあるアプリの 2 枚目を activate + raise（#5）し、通知の直後にそのまま 1 を行う | 切替直後でも窓が付いてくる。付いてこなければ `afterSpaceChange` を raise 後にも置く | | | | | | | |
 
 結果の反映:
 
@@ -821,7 +839,8 @@ struct LayoutSetPlannerTests {
     }
 
     @Test func フルスクリーンの窓は候補から外しそれしかなければfullScreen() {
-        let full = Self.window("chrome", "GitHub", pid: 3, fullScreen: true)
+        // pid を変えて handle を区別する（同じ pid だと CFEqual で同じ窓になる）。
+        let full = Self.window("chrome", "GitHub", pid: 4, fullScreen: true)
         let plan = LayoutSetPlanner.plan(LayoutSet(name: "s", rows: [row("chrome"), row("chrome")]),
                                          windowsByBundle: ["chrome": [full, Self.chrome]])
         #expect(plan.steps.map(\.window) == [Self.chrome])
@@ -1002,6 +1021,7 @@ git commit -m "refactor: extract WindowPlacer from SnapEngine"
       init(enumerator: any WindowEnumerating, windowService: any WindowService, placer: WindowPlacer,
            spaceMover: any SpaceMoving, dockPreferences: any DockPreferencesReading,
            permission: any PermissionChecking,
+           onScreenTimeout: Duration = .seconds(1),       // raise 後に見えるまで待つ上限。テストは短くする
            onStarted: @escaping @MainActor (LayoutSet) -> Void,
            onFinished: @escaping @MainActor (LayoutRunResult) -> Void)
       private(set) var isRunning: Bool
@@ -1012,10 +1032,18 @@ git commit -m "refactor: extract WindowPlacer from SnapEngine"
 
   // テスト用
   @MainActor final class FakeSpaceMover: SpaceMoving {
-      private(set) var calls: [(window: WindowHandle, desktop: Int)]
-      var error: SpaceMoveError?
+      var spaceChangeCount = 0                                   // テストが直接増やして「activate で切り替わった」を再現する
+      private(set) var switchCalls: [Int] = []
+      var switchResult = true                                     // switchTo の戻り値。true なら spaceChangeCount も +1 する
+      private(set) var calls: [(window: WindowHandle, desktop: Int)] = []
+      var error: SpaceMoveError?                                  // move で投げる
+      /// raise のあとにカウンタを増やしたい場合に使う。FakeWindowService.onRaise から呼ぶ。
+      func switchTo(desktop: Int) async throws -> Bool
       func move(_ window: WindowHandle, toDesktop desktop: Int) async throws
   }
+  // FakeWindowService に追加
+  var onRaise: ((WindowHandle) -> Void)?                          // raise のたびに呼ぶフック
+  // FakeWindowEnumerator は onScreenHandles を isOnScreen の答えに使う（Task 2）
   struct FakeDockPreferences: DockPreferencesReading {
       var rearrangesSpacesAutomatically: Bool
       func disableAutomaticRearrangement() throws {}
@@ -1041,8 +1069,8 @@ git commit -m "refactor: extract WindowPlacer from SnapEngine"
 | `skippedDesktopMoves` | 末尾に ` ・ 自動並べ替えがオンなのでデスクトップ移動を飛ばしました` |
 | 対象行が 0 | `連絡: 配置する行がありません` |
 
-「N 件」は何もしない行を除いた行数（`placed.count + skipped.count + failed のうち placed に入っていない行`）。「M 件を配置」は `placed.count`。
-理由は行の順に「 ・ 」でつなぐ。同じ文言が重なっても 1 つにまとめない。移動に失敗しても配置はするので、1 行が placed と failed の両方に入りうる。
+「N 件」は `placed ∪ skipped ∪ failed` の行数（重複を除く）。「M 件を配置」は `placed.count`。M == N なら「N 件を配置」、そうでなければ「N 件中 M 件を配置」。
+理由は行の順に「 ・ 」でつなぐ。同じ文言が重なっても 1 つにまとめない。移動に失敗しても配置はするので、1 行が placed と failed の両方に入りうる（そのとき M == N でも理由は付く）。
 
 - [ ] **Step 1: テストを書く**
 
@@ -1075,7 +1103,8 @@ struct LayoutSetRunnerTests {
         LayoutSetRunner(enumerator: enumerator, windowService: windows,
                         placer: WindowPlacer(windowService: windows, screens: FakeScreenProvider.single),
                         spaceMover: mover, dockPreferences: FakeDockPreferences(rearrangesSpacesAutomatically: rearranges),
-                        permission: permission, onStarted: onStarted, onFinished: onFinished)
+                        permission: permission, onScreenTimeout: .milliseconds(50),
+                        onStarted: onStarted, onFinished: onFinished)
     }
 
     let set = LayoutSet(name: "連絡", rows: [
@@ -1084,8 +1113,15 @@ struct LayoutSetRunnerTests {
         LayoutRow(bundleIdentifier: "teams", appName: "Microsoft Teams", action: .rightThird, desktop: 3),
     ])
 
-    @Test func 成功と飛ばしが結果に入りデスクトップ移動は該当行だけ() async {
+    /// 窓はすべて「いまのデスクトップに見えている」状態にしておく。別デスクトップの再現は各テストで外す。
+    func allOnScreen() {
+        enumerator.onScreenHandles = [Self.line.handle, Self.discord.handle]
+    }
+
+    /// 利用者がデスクトップ 1 にいて、LINE はデスクトップ 3 にある典型。switchTo(3) で切り替わり、LINE はそのまま見える。
+    @Test func 成功と飛ばしが結果に入り移動は不要なら起こさない() async {
         enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
         var results: [LayoutRunResult] = []
         var started: [String] = []
         let runner = makeRunner(onStarted: { started.append($0.name) }, onFinished: { results.append($0) })
@@ -1098,20 +1134,69 @@ struct LayoutSetRunnerTests {
         #expect(result.skipped.map(\.reason) == [.appNotRunning])
         #expect(result.failed.isEmpty)
         #expect(!result.skippedDesktopMoves)
-        #expect(mover.calls.map { $0.desktop } == [3])
-        #expect(mover.calls.map { $0.window } == [Self.line.handle])
-        #expect(windows.activateCalls == [Self.line.handle])                      // desktop のある行だけ
+        #expect(mover.switchCalls == [3])                                          // 利用者を 3 へ
+        #expect(mover.calls.isEmpty)                                               // LINE は 3 で見えているので掴まない
+        #expect(windows.activateCalls == [Self.line.handle, Self.line.handle])     // desktop 行で 1 回 + 終わりに 1 回
         #expect(windows.raiseCalls == [Self.line.handle, Self.discord.handle])
         #expect(windows.unminimizeCalls == [Self.discord.handle])
         #expect(windows.setFrameCalls.count == 2)
         #expect(result.summary == "連絡: 3 件中 2 件を配置 ・ Microsoft Teams は起動していません")
     }
 
+    /// LINE がデスクトップ 1 にあり、activate で利用者が 1 へ連れ戻される場合。掴んで 3 へ運ぶ。
+    @Test func activateで別デスクトップへ切り替わった窓は掴んで運ぶ() async {
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        windows.onRaise = { [mover] handle in
+            if handle == Self.line.handle { mover.spaceChangeCount += 1 }   // activate が起こした切替
+        }
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
+        #expect(mover.switchCalls == [3])
+        #expect(mover.calls.map { $0.window } == [Self.line.handle])
+        #expect(mover.calls.map { $0.desktop } == [3])
+        #expect(results[0].failed.isEmpty)
+    }
+
+    /// 同じデスクトップへ運ぶ行が 2 つあっても、切替は 1 回、掴む操作は 0 回。
+    @Test func 同じ番号への切替は1回だけで既にある窓は掴まない() async {
+        let set = LayoutSet(name: "連絡", rows: [
+            LayoutRow(bundleIdentifier: "line", appName: "LINE", action: .leftThird, desktop: 3),
+            LayoutRow(bundleIdentifier: "discord", appName: "Discord", action: .centerThird, desktop: 3),
+        ])
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
+        #expect(mover.switchCalls == [3])
+        #expect(mover.calls.isEmpty)
+        #expect(results[0].placed.count == 2)
+        #expect(results[0].summary == "連絡: 2 件を配置")
+    }
+
+    /// raise しても見えてこない（activate が拒否された等）行は失敗。配置は行う。
+    @Test func 見えてこない窓は失敗にするが配置はする() async {
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        enumerator.onScreenHandles = [Self.discord.handle]
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
+        let result = results[0]
+        #expect(result.failed.map(\.row) == [set.rows[0]])
+        if case .windowNotOnScreen? = result.failed[0].error as? SpaceMoveError {} else {
+            Issue.record("windowNotOnScreen ではなく \(result.failed[0].error)")
+        }
+        #expect(result.placed == [set.rows[0], set.rows[1]])
+        #expect(mover.calls.isEmpty)
+        #expect(result.summary == "連絡: 3 件中 2 件を配置 ・ LINE を前面に出せませんでした ・ Microsoft Teams は起動していません")
+    }
+
     @Test func spaceMoverが投げたらfailedに入るが配置は行い次の行へ進む() async {
         enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        windows.onRaise = { [mover] _ in mover.spaceChangeCount += 1 }      // 毎回 activate で切り替わる想定
         mover.error = .shortcutDisabled(desktop: 3)
         var results: [LayoutRunResult] = []
-        _ = await makeRunner { results.append($0) }.apply(set)
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
         let result = results[0]
         #expect(result.failed.map(\.row) == [set.rows[0]])
         #expect(result.placed == [set.rows[0], set.rows[1]])
@@ -1119,18 +1204,39 @@ struct LayoutSetRunnerTests {
         #expect(result.summary == "連絡: 3 件中 2 件を配置 ・ デスクトップ 3 へ切り替えるショートカットがオフです ・ Microsoft Teams は起動していません")
     }
 
+    /// 存在しない番号は最初の行で spaceDidNotChange になり、同じ番号の残りの行は掴まずに失敗にする。
+    @Test func 切り替わらなかった番号は以後掴まない() async {
+        let set = LayoutSet(name: "s", rows: [
+            LayoutRow(bundleIdentifier: "line", appName: "LINE", action: .leftThird, desktop: 5),
+            LayoutRow(bundleIdentifier: "discord", appName: "Discord", action: .centerThird, desktop: 5),
+        ])
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        mover.switchResult = false
+        windows.onRaise = { [mover] _ in mover.spaceChangeCount += 1 }
+        mover.error = .spaceDidNotChange(desktop: 5)
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
+        #expect(mover.calls.count == 1)
+        #expect(results[0].failed.count == 2)
+        #expect(results[0].summary == "s: 2 件を配置 ・ デスクトップ 5 へ切り替わりませんでした ・ デスクトップ 5 へ切り替わりませんでした")
+    }
+
     @Test func 起動しているが窓がなければ合う窓がない() async {
         enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord], "teams": []]
+        allOnScreen()
         var results: [LayoutRunResult] = []
-        _ = await makeRunner { results.append($0) }.apply(set)
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
         #expect(results[0].skipped.map(\.reason) == [.noMatchingWindow])
         #expect(results[0].summary == "連絡: 3 件中 2 件を配置 ・ Microsoft Teams に合う窓がありません")
     }
 
     @Test func 自動並べ替えがオンならデスクトップ移動を飛ばす() async {
         enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
         var results: [LayoutRunResult] = []
-        _ = await makeRunner(rearranges: true) { results.append($0) }.apply(set)
+        _ = await makeRunner(rearranges: true, onFinished: { results.append($0) }).apply(set)
+        #expect(mover.switchCalls.isEmpty)
         #expect(mover.calls.isEmpty)
         #expect(results[0].skippedDesktopMoves)
         #expect(results[0].placed.count == 2)
@@ -1140,39 +1246,44 @@ struct LayoutSetRunnerTests {
     @Test func 権限がなければ何もせずfalse() async {
         permission.isTrusted = false
         var results: [LayoutRunResult] = []
-        let started = await makeRunner { results.append($0) }.apply(set)
+        let started = await makeRunner(onFinished: { results.append($0) }).apply(set)
         #expect(!started)
         #expect(results.isEmpty)
         #expect(permission.requestAccessCount == 1)
         #expect(windows.raiseCalls.isEmpty)
     }
 
-    @Test func 何もしない行は件数に入らない() async {
+    @Test func 何もしない行は件数に入らず終わりに先頭行のアプリをアクティブにする() async {
         let set = LayoutSet(name: "s", rows: [
             LayoutRow(bundleIdentifier: "line", appName: "LINE"),
             LayoutRow(bundleIdentifier: "line", appName: "LINE", action: .maximize),
         ])
         enumerator.windowsByBundle = ["line": [Self.line]]
         var results: [LayoutRunResult] = []
-        _ = await makeRunner { results.append($0) }.apply(set)
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
         #expect(results[0].summary == "s: 1 件を配置")
+        #expect(windows.activateCalls == [Self.line.handle])                       // desktop 行がないので終わりの 1 回だけ
     }
 
     @Test func 対象行がなければその旨() async {
         var results: [LayoutRunResult] = []
-        _ = await makeRunner { results.append($0) }.apply(LayoutSet(name: "空"))
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(LayoutSet(name: "空"))
         #expect(results[0].summary == "空: 配置する行がありません")
+        #expect(windows.activateCalls.isEmpty)
     }
 
     @Test func 行の順に処理する() async {
         enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
         _ = await makeRunner().apply(set)
         #expect(windows.raiseCalls == [Self.line.handle, Self.discord.handle])
     }
 }
 ```
 
-`FakeSpaceMover.move` は `error` があれば投げ、なければ `calls` に積む。`FakeWindowService.raise` は `raiseCalls` に積む（Task 2 で追加済み）。
+`makeRunner` の 2 つのクロージャ引数はどちらも既定値を持つので、末尾クロージャ構文は使わず常に `onFinished:` のラベルを書く（末尾クロージャは `onStarted` に束縛されて型エラーになる）。
+
+`FakeSpaceMover.switchTo` は `switchCalls` に積み、`switchResult` が true なら `spaceChangeCount += 1` して true、false ならそのまま false。`FakeSpaceMover.move` は `error` があれば投げ、なければ `calls` に積む。`FakeWindowService.raise` は `raiseCalls` に積んでから `onRaise?(window)` を呼ぶ（Task 2 で追加した `raiseCalls` にフックを足す）。
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
@@ -1184,19 +1295,27 @@ struct LayoutSetRunnerTests {
 
 1. `isRunning` なら false。`permission.isTrusted` でなければ `requestAccess()` して false。
 2. `isRunning = true`（`defer` で戻す）。`onStarted(set)`。`let skipMoves = dockPreferences.rearrangesSpacesAutomatically`。
+   ローカルに `var currentDesktop: Int? = nil`、`var unreachable: Set<Int> = []`、`var lastDesktopWindow: WindowHandle? = nil`、`var firstPlacedWindow: WindowHandle? = nil`。
 3. `set.rows` の `bundleIdentifier` の重複を除いた集合ごとに `enumerator.windows(ofBundleIdentifier:)` を呼び、nil でないものを `windowsByBundle` に入れる（`[]` もそのまま入れる。nil = 起動していない）。
-4. `LayoutSetPlanner.plan` の `steps` を順に:
+4. `LayoutSetPlanner.plan` の `steps` を順に（設計書 §2.4 手順 5）:
    1. `isMinimized` なら `unminimize`。
-   2. `desktop` があり `!skipMoves` なら `activate` → `raise` → `spaceMover.move(window, toDesktop:)`。それ以外は `raise` だけ。
-   3. `action` があれば `placer.place`。成功したら `placed` に入れる。
-   4. 2 または 3 で `throw` されたらその行を `failed` に入れる。2 で投げられても 3 は行う。
-5. `LayoutRunResult` を作って `onFinished` に渡す。
+   2. `desktop` がない、または `skipMoves` なら `raise` だけ。
+   3. `desktop == N` で `!skipMoves` なら:
+      - `unreachable.contains(N)` → `failed` に `spaceDidNotChange(N)` を記録して 4 へ。
+      - `currentDesktop != N` → `spaceMover.switchTo(desktop: N)`。戻り値に関わらず `currentDesktop = N`（false は「すでにそこ」か「存在しない」）。
+      - `let before = spaceMover.spaceChangeCount`。`activate` → `raise`。`lastDesktopWindow = window`。
+      - `enumerator.isOnScreen(window)` が true になるまで `pollInterval` ずつ、上限 `onScreenTimeout`（`SpaceMoverTiming` の値を Runner にも渡すか、Runner 自身の定数 1 秒）待つ。true にならなければ `failed` に `SpaceMoveError.windowNotOnScreen` を記録して 4 へ。
+      - `spaceMover.spaceChangeCount > before` なら（activate が切替を起こした）`currentDesktop = nil`。
+      - `currentDesktop == N` なら移動不要。そうでなければ `spaceMover.move(window, toDesktop: N)`。成功で `currentDesktop = N`。`spaceDidNotChange` で `unreachable.insert(N)`。例外はその行の `failed` に記録（行につき最初の 1 つだけ）。
+   4. `action` があれば `placer.place`。成功したら `placed` に入れ、`firstPlacedWindow` が nil なら入れる。例外は `failed` に記録（すでにその行の記録があれば捨てる）。
+5. `lastDesktopWindow ?? firstPlacedWindow` があれば `activate` を 1 回呼ぶ（例外は無視）。
+6. `LayoutRunResult` を作って `onFinished` に渡す。
 
-`summary` は上の表のとおり。
+`summary` は上の表のとおり。「N 件」は `placed ∪ failed ∪ skipped` の行の数（重複を除く）。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-テスト実行（`LayoutSetRunnerTests`）。Expected: 8 件 PASS。
+テスト実行（`LayoutSetRunnerTests`）。Expected: 13 件 PASS。
 
 - [ ] **Step 5: コミット**
 
@@ -1406,7 +1525,7 @@ git commit -m "feat: capture the current window arrangement as layout rows"
 
 - [ ] **Step 3: AppModel とメニューを配線する**
 
-`AppModel`: `layoutSets = LayoutSetStore()`、`hud = ResultHUD()`、`enumerator = AccessibilityWindowEnumerator()`、`runner = LayoutSetRunner(enumerator: enumerator, windowService: AccessibilityWindowService(), placer: WindowPlacer(...), spaceMover: CGEventSpaceMover(shortcuts: MissionControlShortcuts(), enumerator: enumerator), dockPreferences: DockPreferences(), permission: permission, onStarted: { [weak self] in self?.hud.showPersistent("\($0.name) を適用中…") }, onFinished: { [weak self] in self?.engine.clearMemory(); self?.hud.show($0.summary) })`。`start()` で `ShortcutRegistrar.register(engine:settings:isBusy: { [runner] in runner.isRunning })` と `registerLayoutSets(store:isBusy:onPicker:onApply:)` を呼ぶ。
+`AppModel`: `layoutSets = LayoutSetStore()`、`hud = ResultHUD()`、`enumerator = AccessibilityWindowEnumerator()`、`windowService = AccessibilityWindowService()`。`init` では `self` を捕捉できない（全プロパティ初期化前）ので、`LayoutSetRunner` の `onStarted` / `onFinished` は `init` でローカル定数に取り出した `hud` と `engine` だけを捕捉する: `let hud = self.hud; let engine = self.engine; runner = LayoutSetRunner(..., spaceMover: CGEventSpaceMover(shortcuts: MissionControlShortcuts(), enumerator: enumerator, windowService: windowService), dockPreferences: DockPreferences(), permission: permission, onStarted: { hud.showPersistent("\($0.name) を適用中…") }, onFinished: { engine.clearMemory(); hud.show($0.summary) })`（既存の `permission` と同じ書き方）。`showPersistent` は `ignoresMouseEvents = true` に、`show` は false に戻す。`apply(_:)` は先に `picker?.close()` してから `Task { if await !runner.apply(set) { NSSound.beep() } }`。`start()` で `ShortcutRegistrar.register(engine:settings:isBusy: { [runner] in runner.isRunning })` と `registerLayoutSets(store:isBusy:onPicker:onApply:)` を呼ぶ。
 
 `MenuBarView`: 「設定…」の上に `Button("レイアウトセット…") { model.openPicker() }`。`model.layoutSets.sets` が空でなければその下に各セットの `Button(set.name) { model.apply(set) }` を並べ、`Divider()`。
 
@@ -1524,9 +1643,14 @@ struct PickerStateTests {
 
 `PickerView`: モックに従う。上に `TextField`（プレースホルダ「レイアウトセットを検索…」、右に「N セット」）、中に行（`RegionGlyph(actions: set.rows.compactMap(\.action))` 幅 48 高さ 32、名前、要約「`appName` `action.title`」を「 ・ 」でつないだもの、`desktop` があるものは「デスクトップ N」のバッジ、キーは `KeyboardShortcuts.getShortcut(for: set.shortcutName)?.description` か「未割当」）、下にヒント「⏎ 適用  ↑↓ 選択  →← 内訳  ⌘⏎ 編集  esc 閉じる」。選択行は `Color.accentColor` で塗り、文字は反転色。`expandedID` の行は下に各行の「appName / action.title / デスクトップ N」を縦に並べる。行のクリックで `onApply`。セットが 0 件なら「設定でセットを作ってください」と Enter で `onEdit(nil)`。
 
-`PickerPanel`: `styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel]` は使わず `[.borderless]`、`level = .floating`、`collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]`、`isMovable = false`、幅 620。`canBecomeKey` を true に上書き。`keyDown` を上書きして ↑↓ / ⏎ / ⌘⏎ / esc / → / ← を処理し、それ以外は `super`（検索欄へ）。`resignKey` で閉じる。`toggle` は `NSApp.activate()` → `makeKeyAndOrderFront` → 検索欄へフォーカス。`onApply` の前に `close()`。
+`PickerPanel`: `styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel]` は使わず `[.borderless]`、`level = .floating`、`collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]`、`isMovable = false`、幅 620。`canBecomeKey` を true に上書き。`resignKey` で閉じる。
+`toggle` は開く前に `NSWorkspace.shared.frontmostApplication` を `previousApp` に覚え、`NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)` → `makeKeyAndOrderFront` → 検索欄へフォーカス。`close()` は `orderOut` のあと `previousApp?.activate()` で元のアプリに戻す（メニューバーアプリは窓を閉じてもアクティブなままで、戻さないと既存コマンドが beep し続ける）。`onApply` の前に `close()`。
+キー操作は検索欄が first responder でもフィールドエディタに食われないよう、`PickerView` のルートに `.onKeyPress(.upArrow)` / `.downArrow` / `.return` / `.escape` / `.rightArrow` / `.leftArrow` を付けて処理する（`.return` は `modifiers` に `.command` が含まれれば `onEdit`）。`NSPanel.keyDown` の上書きには頼らない。
 
-`AppModel.openPicker()`: `picker.toggle()`。`onApply` は `apply(set)`、`onEdit` は `NSApp.activate()` して設定を開く。ピッカーは `App` のシーン外なので `@Environment(\.openSettings)` が使えない。`AppModel` に `openSettingsRequest: Int`（`@Observable`）を持ち、`MenuBarView`（シーン内）がそれを `onChange` で見て `openSettings()` を呼ぶ形にする。`NSApp.sendAction(Selector(("showSettingsWindow:")))` は非公開のセレクタなので使わない。Task 11 でタブ選択を足す。
+`AppModel.openPicker()`: `picker.toggle()`。`onApply` は `apply(set)`、`onEdit` は設定を開く。ピッカーは `App` のシーン外なので `@Environment(\.openSettings)` が直接使えない。2 案を両方入れ、実機で動く方を残す:
+- 案 A: `MenuBarView` の `onAppear` で `@Environment(\.openSettings)` の値を `model.openSettingsAction` に保存し、ピッカーはそれを呼ぶ。メニューを一度も開いていないと nil なので、その場合は案 B へ。
+- 案 B: `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)`（非公開セレクタ。macOS 14〜26 で動く報告がある）。
+Task 11 でタブ選択を足す。
 
 - [ ] **Step 4: ビルドとテストが通ることを確認する**
 
@@ -1542,8 +1666,10 @@ struct PickerStateTests {
 4. Enter またはクリックでピッカーが閉じ、セットが適用され、HUD が出る。
 5. esc で閉じる。別のアプリをクリックしても閉じる。
 6. 別のデスクトップでもピッカーが出る。フルスクリーンアプリの上でも出て、その空間を離れない。
-7. ⌘⏎ で設定画面が開く（Task 11 まではタブは既定のまま）。
+7. ⌘⏎ で設定画面が開く（Task 11 まではタブは既定のまま）。案 A と案 B のどちらで動いたかを記録し、動かない方を消す。
 8. 適用中（HUD が「適用中…」の間）にピッカーのキーを押すと beep して開かない。
+9. ピッカーを esc で閉じた直後に ⌃⌥m を押すと、ピッカーを開く前に前面だったアプリの窓が最大化される（beep しない）。
+10. 検索欄に文字を入れた状態でも ↑↓ / ⏎ / esc が効く。
 
 - [ ] **Step 6: コミット**
 
@@ -1586,7 +1712,7 @@ git commit -m "feat: add layout set picker panel"
 
 - Section「ピッカー」: `KeyboardShortcuts.Recorder("ピッカーを開く", name: ShortcutRegistrar.pickerName)`。
 - 警告（該当時のみ、Section の上）:
-  - `dockPreferences.rearrangesSpacesAutomatically` が true で、いずれかのセットに `desktop != nil` の行があるとき: 「Mission Control の『最新の使用状況に基づいて操作スペースを自動的に並べ替える』がオンです。オンの間はデスクトップ番号への移動を飛ばします。」と `Button("オフにする…")`。押すと `confirmationDialog`「Dock を再起動します。デスクトップの並びが変わることがあります。」→ 了承で `try dockPreferences.disableAutomaticRearrangement()`。失敗は `Alert` で表示。
+  - `dockPreferences.rearrangesSpacesAutomatically` が true で、いずれかのセットに `desktop != nil` の行があるとき: 「Mission Control の『最新の使用状況に基づいて操作スペースを自動的に並べ替える』がオンです。オンの間はデスクトップ番号への移動を飛ばします。」と `Button("オフにする…")`。押すと `confirmationDialog`「Dock を再起動します。デスクトップの並びが変わることがあります。」→ 了承で `try dockPreferences.disableAutomaticRearrangement()`。直後に `rearrangesSpacesAutomatically` を読み直して警告を消す（`onAppear` 頼みにしない。Dock 再起動で利用者が別デスクトップへ飛ぶことがあるため）。失敗は `Alert` で「システム設定 → デスクトップと Dock で手動でオフにしてください」と案内する。
   - 各セットの `desktop` の集合のうち `missionControl.switchToDesktopShortcut(n) == nil` のものがあるとき: 「デスクトップ N へ切り替えるショートカットがオフです。システム設定 → キーボード → キーボードショートカット → Mission Control で有効にしてください。」と `Button("システム設定を開く")`（`x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Shortcuts`）。
   - 両方とも表示のたびに読み直す（`onAppear` と `scenePhase` の変化で）。
 - Section「セット」: `List` に `ForEach(model.layoutSets.sets)` で `LayoutSetEditor`（`DisclosureGroup`。ヘッダ: 名前の `TextField`（`onSubmit` と `onChange` で `store.update`）、`KeyboardShortcuts.Recorder(for: set.shortcutName)`、削除ボタン）。開くと `ForEach(set.rows)` で `LayoutRowEditor`、`onMove` で行の並び替え、「行を追加」。`settingsTab == .layoutSets(selectedID:)` の id は最初から開く。
@@ -1637,7 +1763,7 @@ git commit -m "feat: layout sets settings tab with editor, capture, and desktop 
 - 何ができるか（複数の窓を一括配置、ピッカー、セットごとのキー、いまの配置を保存）。
 - デスクトップ移動の仕組み: タイトルバーを掴んだまま Mission Control の「デスクトップ N へ切り替え」を送る。非公開 API は使わない。
 - 必要な設定: システム設定 → キーボード → キーボードショートカット → Mission Control で「デスクトップ N へ切り替え」をオン。「最新の使用状況に基づいて操作スペースを自動的に並べ替える」はオフ（設定画面の「オフにする」ボタンでも可）。オンの間はデスクトップ移動を飛ばす。
-- 制約: 番号は Mission Control の並び全体の通し番号で、複数ディスプレイでは別ディスプレイのデスクトップを指すことがある（対象外）。存在しない番号は「切り替わりませんでした」になる。フルスクリーンの窓は対象外。タイトルバーのないアプリ（WezTerm の `window_decorations = "RESIZE"` など）は移動できない。Task 2 で × だったアプリがあればその名前。
+- 制約: 番号は Mission Control の並び全体の通し番号で、複数ディスプレイでは別ディスプレイのデスクトップを指すことがある（対象外）。存在しない番号は「切り替わりませんでした」になる。フルスクリーンの窓は対象外。タイトルバーのないアプリ（WezTerm の `window_decorations = "RESIZE"` など）は移動できない。セキュア入力中（パスワード欄、Secure Keyboard Entry）は移動できない。同じアプリに同じ枠の窓が 2 枚あると「タイトルバーを掴めませんでした」になることがある。手入力した bundle id が通常のアプリでない場合は「起動していないか、通常のアプリではありません」になる。Task 2 で × だったアプリがあればその名前。
 - トラブルシュート: `defaults write dev.hidekingerz.tatami debugMenu -bool YES` でデバッグメニュー、`log stream` の述語。
 
 - [ ] **Step 2: コミット**
