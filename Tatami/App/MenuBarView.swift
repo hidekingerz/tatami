@@ -17,6 +17,10 @@ struct MenuBarView: View {
         Button("レイアウトセット…") {
             model.openPicker()
         }
+        .onAppear {
+            // ピッカーの ⌘⏎ から設定画面を開けるよう、シーン内でしか得られないアクションを預ける。
+            model.openSettingsAction = openSettings
+        }
         if !model.layoutSets.sets.isEmpty {
             ForEach(model.layoutSets.sets) { set in
                 Button(set.name) {

@@ -29,4 +29,10 @@ struct RegionGlyphTests {
         #expect(unit.contains(region), "\(action): \(region)")
         #expect(region.width > 0 && region.height > 0)
     }
+
+    @Test func 複数区画のグリフは各区画の正規化矩形を重ねる() {
+        let regions = [SnapAction.leftThird, .centerThird, .rightThird].map(RegionGlyph.normalizedRegion(for:))
+        #expect(regions.map(\.minX) == [0, 1.0 / 3, 2.0 / 3])
+        #expect(regions.allSatisfy { $0.height == 1 })
+    }
 }

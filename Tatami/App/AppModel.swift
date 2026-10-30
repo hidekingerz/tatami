@@ -1,6 +1,7 @@
 // Tatami/App/AppModel.swift
 import AppKit
 import Observation
+import SwiftUI
 
 /// アプリ全体で 1 つだけ持つ依存の束。
 ///
@@ -17,6 +18,11 @@ final class AppModel {
     @ObservationIgnored let hud = ResultHUD()
     @ObservationIgnored let runner: LayoutSetRunner
     @ObservationIgnored private var poller: TrustPoller?
+    /// ピッカー。初めて開くときに作る。
+    @ObservationIgnored private var picker: PickerPanel?
+    /// `MenuBarView` が表示されたときに預ける設定画面を開くアクション。
+    /// ピッカーは `App` のシーン外にあり `@Environment(\.openSettings)` を直接使えないため。
+    @ObservationIgnored var openSettingsAction: OpenSettingsAction?
 
     /// メニュー表示用の権限状態。通知やポーリングのたびに `refreshTrust()` で読み直す。
     /// スナップ時の判定は SnapEngine が毎回 OS に問い合わせるので、この値には依存しない。
@@ -90,11 +96,33 @@ final class AppModel {
         }
     }
 
-    /// レイアウトセットのピッカーを開く。中身は Task 10 で入れる。
-    func openPicker() {}
+    /// レイアウトセットのピッカーを開く。出ていれば閉じる。
+    func openPicker() {
+        let picker = self.picker ?? PickerPanel(
+            store: layoutSets,
+            onApply: { [weak self] set in self?.apply(set) },
+            onEdit: { [weak self] set in self?.openSettings(for: set) }
+        )
+        self.picker = picker
+        picker.toggle()
+    }
 
-    /// レイアウトセットのピッカーを閉じる。中身は Task 10 で入れる。
-    func closePicker() {}
+    /// レイアウトセットのピッカーを閉じる。開いていなければ何もしない。
+    func closePicker() {
+        picker?.close()
+    }
+
+    /// 設定画面を開く。set の選択（「セット」タブを開いてそのセットを展開する）は Task 11 で足す。
+    /// メニューを一度も開いていないと `openSettingsAction` が nil なので、そのときは
+    /// 非公開セレクタ `showSettingsWindow:` を送る。
+    private func openSettings(for set: LayoutSet?) {
+        NSApp.activate()
+        if let openSettingsAction {
+            openSettingsAction()
+        } else {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+    }
 
     /// 許可されるまで 1 秒おきに権限を読み直す。許可を検知したらメニュー表示を更新して止まる。
     private func watchTrustUntilGranted() {
