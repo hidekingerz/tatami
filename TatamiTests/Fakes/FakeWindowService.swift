@@ -21,6 +21,8 @@ final class FakeWindowService: WindowService {
 
     /// raise で投げるエラー。nil なら成功。
     var raiseError: WindowServiceError?
+    /// raise のたびに（raiseCalls に積んだあと）呼ぶフック。
+    var onRaise: ((WindowHandle) -> Void)?
 
     private(set) var setFrameCalls: [CGRect] = []
     private(set) var unminimizeCalls: [WindowHandle] = []
@@ -60,6 +62,7 @@ final class FakeWindowService: WindowService {
     func raise(_ window: WindowHandle) throws {
         if let raiseError { throw raiseError }
         raiseCalls.append(window)
+        onRaise?(window)
     }
 
     func activate(_ window: WindowHandle) throws {
