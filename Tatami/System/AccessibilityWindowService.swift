@@ -47,6 +47,37 @@ struct AccessibilityWindowService: WindowService {
         try write(kAXSizeAttribute, as: .cgSize, value: &size, to: window)
     }
 
+    func unminimize(_ window: WindowHandle) throws {
+        try setAttribute(kAXMinimizedAttribute, to: kCFBooleanFalse, of: window)
+    }
+
+    func raise(_ window: WindowHandle) throws {
+        try setAttribute(kAXMainAttribute, to: kCFBooleanTrue, of: window)
+        let result = AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        guard result == .success else {
+            throw WindowServiceError.axError(result)
+        }
+    }
+
+    /// activate の成否（戻り値）は見ない。通ったかどうかは SpaceMover の「見えているか」の確認で分かる。
+    func activate(_ window: WindowHandle) throws {
+        var pid: pid_t = 0
+        let result = AXUIElementGetPid(window.element, &pid)
+        guard result == .success else {
+            throw WindowServiceError.axError(result)
+        }
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        app.unhide()
+        app.activate()
+    }
+
+    private func setAttribute(_ attribute: String, to value: CFTypeRef, of window: WindowHandle) throws {
+        let result = AXUIElementSetAttributeValue(window.element, attribute as CFString, value)
+        guard result == .success else {
+            throw WindowServiceError.axError(result)
+        }
+    }
+
     private func read<T>(
         _ attribute: String, as type: AXValueType, into out: inout T, from window: WindowHandle
     ) throws {

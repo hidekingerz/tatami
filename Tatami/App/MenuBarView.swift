@@ -18,6 +18,9 @@ struct MenuBarView: View {
             NSApp.activate()
             openSettings()
         }
+        if DebugMenu.isEnabled {
+            DebugMenu()
+        }
         Divider()
         Button("tatami を終了") {
             NSApp.terminate(nil)

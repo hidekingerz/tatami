@@ -22,4 +22,10 @@ protocol WindowService {
     func frame(of window: WindowHandle) throws -> CGRect
     /// 枠を設定する。実装は size → position → size の順で適用する。
     func setFrame(_ frame: CGRect, of window: WindowHandle) throws
+    /// 最小化を戻す（kAXMinimizedAttribute = false）。
+    func unminimize(_ window: WindowHandle) throws
+    /// アプリ内で前面に出す（kAXMainAttribute = true、kAXRaiseAction）。アプリはアクティブにしない。
+    func raise(_ window: WindowHandle) throws
+    /// その窓のアプリを unhide してからアクティブにする。
+    func activate(_ window: WindowHandle) throws
 }
