@@ -14,6 +14,17 @@ struct MenuBarView: View {
             }
             Divider()
         }
+        Button("レイアウトセット…") {
+            model.openPicker()
+        }
+        if !model.layoutSets.sets.isEmpty {
+            ForEach(model.layoutSets.sets) { set in
+                Button(set.name) {
+                    model.apply(set)
+                }
+            }
+            Divider()
+        }
         Button("設定…") {
             NSApp.activate()
             openSettings()

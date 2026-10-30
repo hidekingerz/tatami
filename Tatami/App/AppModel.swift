@@ -12,6 +12,10 @@ final class AppModel {
     @ObservationIgnored let permission = PermissionGate()
     @ObservationIgnored let engine: SnapEngine
     @ObservationIgnored let settings = CommandSettings()
+    /// メニューは store 自身を観測するので、ここでは観測対象にしない。
+    @ObservationIgnored let layoutSets = LayoutSetStore()
+    @ObservationIgnored let hud = ResultHUD()
+    @ObservationIgnored let runner: LayoutSetRunner
     @ObservationIgnored private var poller: TrustPoller?
 
     /// メニュー表示用の権限状態。通知やポーリングのたびに `refreshTrust()` で読み直す。
@@ -19,12 +23,34 @@ final class AppModel {
     private(set) var isTrusted: Bool
 
     init() {
+        // 全プロパティの初期化前は self を捕捉できないので、クロージャにはローカル定数だけを渡す。
         let permission = self.permission
-        engine = SnapEngine(
-            windowService: AccessibilityWindowService(),
-            screens: NSScreenProvider(),
+        let hud = self.hud
+        let windowService = AccessibilityWindowService()
+        let screens = NSScreenProvider()
+        let enumerator = AccessibilityWindowEnumerator()
+        let engine = SnapEngine(
+            windowService: windowService,
+            screens: screens,
             permission: permission,
             onFailure: { _ in NSSound.beep() }
+        )
+        self.engine = engine
+        runner = LayoutSetRunner(
+            enumerator: enumerator,
+            windowService: windowService,
+            placer: WindowPlacer(windowService: windowService, screens: screens),
+            spaceMover: CGEventSpaceMover(
+                shortcuts: MissionControlShortcuts(), enumerator: enumerator, windowService: windowService
+            ),
+            dockPreferences: DockPreferences(),
+            permission: permission,
+            onStarted: { set in hud.showPersistent("\(set.name) を適用中…") },
+            onFinished: { result in
+                // セットが窓を動かしたので、直前のスナップの記憶はもう当てにならない。
+                engine.clearMemory()
+                hud.show(result.summary)
+            }
         )
         isTrusted = permission.isTrusted
 
@@ -42,9 +68,33 @@ final class AppModel {
     func start() {
         guard ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil else { return }
         permission.requestAccess()
-        ShortcutRegistrar.register(engine: engine, settings: settings)
+        ShortcutRegistrar.register(engine: engine, settings: settings, isBusy: { [runner] in runner.isRunning })
+        ShortcutRegistrar.registerLayoutSets(
+            store: layoutSets,
+            isBusy: { [runner] in runner.isRunning },
+            onPicker: { [weak self] in self?.openPicker() },
+            onApply: { [weak self] in self?.apply($0) }
+        )
         watchTrustUntilGranted()
     }
+
+    /// レイアウトセットを適用する。実行中や権限なしで適用できなかったら beep する。
+    /// ピッカーが開いていると tatami が前面に残り、合成マウス操作を邪魔するので先に閉じる。
+    func apply(_ set: LayoutSet) {
+        closePicker()
+        let runner = self.runner
+        Task {
+            if await !runner.apply(set) {
+                NSSound.beep()
+            }
+        }
+    }
+
+    /// レイアウトセットのピッカーを開く。中身は Task 10 で入れる。
+    func openPicker() {}
+
+    /// レイアウトセットのピッカーを閉じる。中身は Task 10 で入れる。
+    func closePicker() {}
 
     /// 許可されるまで 1 秒おきに権限を読み直す。許可を検知したらメニュー表示を更新して止まる。
     private func watchTrustUntilGranted() {
