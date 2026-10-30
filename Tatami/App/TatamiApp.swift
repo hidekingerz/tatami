@@ -17,7 +17,7 @@ struct TatamiApp: App {
             MenuBarView(model: model)
         }
         Settings {
-            SettingsView(settings: model.settings)
+            SettingsView(model: model)
         }
     }
 }

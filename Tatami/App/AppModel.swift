@@ -17,6 +17,11 @@ final class AppModel {
     @ObservationIgnored let layoutSets = LayoutSetStore()
     @ObservationIgnored let hud = ResultHUD()
     @ObservationIgnored let runner: LayoutSetRunner
+    /// 設定画面の「いまの配置を保存」が使う。
+    @ObservationIgnored let capture: LayoutCapture
+    /// runner に渡したものと同じインスタンス。設定画面の警告が読む。
+    @ObservationIgnored let dockPreferences: any DockPreferencesReading
+    @ObservationIgnored let missionControl: any MissionControlShortcutReading
     @ObservationIgnored private var poller: TrustPoller?
     /// ピッカー。初めて開くときに作る。
     @ObservationIgnored private var picker: PickerPanel?
@@ -28,6 +33,9 @@ final class AppModel {
     /// スナップ時の判定は SnapEngine が毎回 OS に問い合わせるので、この値には依存しない。
     private(set) var isTrusted: Bool
 
+    /// 設定画面で選ばれているタブ。ピッカーの ⌘⏎ が「セット」タブと開くセットを指定する。
+    var settingsTab: SettingsTab = .commands(.halves)
+
     init() {
         // 全プロパティの初期化前は self を捕捉できないので、クロージャにはローカル定数だけを渡す。
         let permission = self.permission
@@ -35,6 +43,8 @@ final class AppModel {
         let windowService = AccessibilityWindowService()
         let screens = NSScreenProvider()
         let enumerator = AccessibilityWindowEnumerator()
+        let dockPreferences = DockPreferences()
+        let missionControl = MissionControlShortcuts()
         let engine = SnapEngine(
             windowService: windowService,
             screens: screens,
@@ -42,14 +52,17 @@ final class AppModel {
             onFailure: { _ in NSSound.beep() }
         )
         self.engine = engine
+        self.dockPreferences = dockPreferences
+        self.missionControl = missionControl
+        capture = LayoutCapture(enumerator: enumerator, screens: screens)
         runner = LayoutSetRunner(
             enumerator: enumerator,
             windowService: windowService,
             placer: WindowPlacer(windowService: windowService, screens: screens),
             spaceMover: CGEventSpaceMover(
-                shortcuts: MissionControlShortcuts(), enumerator: enumerator, windowService: windowService
+                shortcuts: missionControl, enumerator: enumerator, windowService: windowService
             ),
-            dockPreferences: DockPreferences(),
+            dockPreferences: dockPreferences,
             permission: permission,
             onStarted: { set in hud.showPersistent("\(set.name) を適用中…") },
             onFinished: { result in
@@ -112,10 +125,11 @@ final class AppModel {
         picker?.close()
     }
 
-    /// 設定画面を開く。set の選択（「セット」タブを開いてそのセットを展開する）は Task 11 で足す。
+    /// 設定画面の「セット」タブを開き、set があればそれを展開する。
     /// メニューを一度も開いていないと `openSettingsAction` が nil なので、そのときは
     /// 非公開セレクタ `showSettingsWindow:` を送る。
     private func openSettings(for set: LayoutSet?) {
+        settingsTab = .layoutSets(selectedID: set?.id)
         NSApp.activate()
         if let openSettingsAction {
             openSettingsAction()
