@@ -16,6 +16,8 @@ struct LayoutSetsTab: View {
     @State private var expanded: Set<UUID> = []
     /// Mission Control の自動並べ替え（mru-spaces）がオンか。表示のたびに読み直す。
     @State private var rearrangesSpaces = false
+    /// 「アプリケーションの切り替えで…スペースに切り替える」（workspaces-auto-swoosh）がオンか。表示のたびに読み直す。
+    @State private var switchesToAppSpace = true
     /// 「デスクトップ N へ切り替え」が有効な N。表示のたびに読み直す。
     @State private var enabledDesktopShortcuts: Set<Int> = []
     @State private var isConfirmingDisable = false
@@ -52,6 +54,20 @@ struct LayoutSetsTab: View {
                         buttonTitle: "オフにする…"
                     ) {
                         isConfirmingDisable = true
+                    }
+                }
+            }
+
+            if !switchesToAppSpace && !usedDesktops.isEmpty {
+                Section {
+                    warning(
+                        "Mission Control の「アプリケーションの切り替えで、アプリケーションのウインドウが開いているスペースに切り替える」がオフです。"
+                            + "オンでないと別デスクトップの窓を回収できません。",
+                        buttonTitle: "システム設定を開く"
+                    ) {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension") {
+                            openURL(url)
+                        }
                     }
                 }
             }
@@ -159,9 +175,10 @@ struct LayoutSetsTab: View {
         model.settingsTab = .layoutSets(selectedID: nil)
     }
 
-    /// OS 側の設定（自動並べ替えとデスクトップ切り替えのショートカット）を読み直す。
+    /// OS 側の設定（自動並べ替え、アプリのスペースへの切替、デスクトップ切り替えのショートカット）を読み直す。
     private func refreshWarnings() {
         rearrangesSpaces = model.dockPreferences.rearrangesSpacesAutomatically
+        switchesToAppSpace = model.dockPreferences.switchesToAppSpace
         enabledDesktopShortcuts = Set(LayoutRow.desktopRange.filter {
             model.missionControl.switchToDesktopShortcut($0) != nil
         })

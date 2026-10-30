@@ -27,6 +27,7 @@ final class FakeWindowService: WindowService {
     private(set) var setFrameCalls: [CGRect] = []
     private(set) var unminimizeCalls: [WindowHandle] = []
     private(set) var raiseCalls: [WindowHandle] = []
+    private(set) var unhideCalls: [WindowHandle] = []
     private(set) var activateCalls: [WindowHandle] = []
     private var pendingReadError: WindowServiceError?
 
@@ -63,6 +64,10 @@ final class FakeWindowService: WindowService {
         if let raiseError { throw raiseError }
         raiseCalls.append(window)
         onRaise?(window)
+    }
+
+    func unhide(_ window: WindowHandle) throws {
+        unhideCalls.append(window)
     }
 
     func activate(_ window: WindowHandle) throws {

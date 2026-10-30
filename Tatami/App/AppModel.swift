@@ -136,6 +136,12 @@ final class AppModel {
         } else {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
+        // 経路 B が効かなかったときに、窓のないまま tatami がアクティブに残り、
+        // 押したキーがすべて beep し続けないように、少し待って窓がなければアクティブをやめる。
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            if NSApp.keyWindow == nil && NSApp.isActive { NSApp.deactivate() }
+        }
     }
 
     /// 許可されるまで 1 秒おきに権限を読み直す。許可を検知したらメニュー表示を更新して止まる。

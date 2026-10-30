@@ -15,4 +15,13 @@ struct DockPreferencesTests {
         #expect(DockPreferences.rearrangesSpacesAutomatically(from: true))
         #expect(DockPreferences.rearrangesSpacesAutomatically(from: 1))
     }
+
+    @Test func 値がなければアプリのスペースへ切り替える() {
+        #expect(DockPreferences.switchesToAppSpace(from: nil))
+    }
+
+    @Test func workspacesAutoSwooshが保存されていればその値() {
+        #expect(!DockPreferences.switchesToAppSpace(from: false))
+        #expect(DockPreferences.switchesToAppSpace(from: true))
+    }
 }

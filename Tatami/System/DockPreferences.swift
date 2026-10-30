@@ -5,18 +5,32 @@ enum DockPreferencesError: Error, Equatable {
     case restartFailed(status: Int32)
 }
 
-/// Dock の「最近の使用状況に基づいて操作スペースを自動的に並べ替える」設定。
+/// Dock の「最近の使用状況に基づいて操作スペースを自動的に並べ替える」設定と、
+/// 「アプリケーションの切り替えで、アプリケーションのウインドウが開いているスペースに切り替える」設定。
 protocol DockPreferencesReading: Sendable {
     var rearrangesSpacesAutomatically: Bool { get }
+    /// オフだと activate しても別デスクトップの窓へ切り替わらず、窓を回収できない。
+    var switchesToAppSpace: Bool { get }
     func disableAutomaticRearrangement() throws
 }
 
 struct DockPreferences: DockPreferencesReading {
     private static let appID = "com.apple.dock"
     private static let key = "mru-spaces"
+    private static let swooshKey = "workspaces-auto-swoosh"
 
     var rearrangesSpacesAutomatically: Bool {
         Self.rearrangesSpacesAutomatically(from: CFPreferencesCopyAppValue(Self.key as CFString, Self.appID as CFString))
+    }
+
+    var switchesToAppSpace: Bool {
+        Self.switchesToAppSpace(from: CFPreferencesCopyAppValue(Self.swooshKey as CFString, Self.appID as CFString))
+    }
+
+    /// 値が未設定（nil）のときは macOS の既定どおりオン。
+    static func switchesToAppSpace(from value: Any?) -> Bool {
+        guard let number = value as? NSNumber else { return true }
+        return number.boolValue
     }
 
     /// 値が未設定（nil）のときは macOS の既定どおりオン。

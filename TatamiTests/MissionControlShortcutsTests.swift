@@ -36,6 +36,16 @@ struct MissionControlShortcutsTests {
         #expect(MissionControlShortcuts.shortcut(forDesktop: 11, in: hotKeys) == nil)
     }
 
+    @Test func キーコード65535は未割り当てなのでnil() {
+        let hotKeys = ["118": Self.entry(enabled: true, keyCode: 65535, modifiers: 0x40000)]
+        #expect(MissionControlShortcuts.shortcut(forDesktop: 1, in: hotKeys) == nil)
+    }
+
+    @Test func キーコードが0xFFFFを超えればnil() {
+        let hotKeys = ["118": Self.entry(enabled: true, keyCode: 70000, modifiers: 0x40000)]
+        #expect(MissionControlShortcuts.shortcut(forDesktop: 1, in: hotKeys) == nil)
+    }
+
     @Test func 修飾キーはcontrol_option_shift_commandだけ拾う() {
         // control + option + shift + command + 無関係なビット
         let hotKeys = ["118": Self.entry(enabled: true, keyCode: 18, modifiers: 0x40000 | 0x80000 | 0x20000 | 0x100000 | 0x1)]

@@ -60,8 +60,52 @@ struct LayoutSetRunnerTests {
         #expect(windows.activateCalls == [Self.line.handle, Self.line.handle])     // desktop 行で 1 回 + 終わりに 1 回
         #expect(windows.raiseCalls == [Self.line.handle, Self.discord.handle])
         #expect(windows.unminimizeCalls == [Self.discord.handle])
+        #expect(windows.unhideCalls == [Self.discord.handle])                     // desktop のない行は unhide してから raise
         #expect(windows.setFrameCalls.count == 2)
         #expect(result.summary == "連絡: 3 件中 2 件を配置 ・ Microsoft Teams は起動していません")
+    }
+
+    static let desktopOnlySet = LayoutSet(name: "移動", rows: [
+        LayoutRow(bundleIdentifier: "line", appName: "LINE", desktop: 3),
+        LayoutRow(bundleIdentifier: "discord", appName: "Discord", action: .centerThird),
+    ])
+
+    @Test func デスクトップ移動だけの行も誤りなく終われば成功に数える() async {
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(Self.desktopOnlySet)
+        #expect(results[0].failed.isEmpty)
+        #expect(results[0].summary == "移動: 2 件を配置")
+    }
+
+    @Test func 自動並べ替えがオンならデスクトップ移動だけの行は数えない() async {
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(rearranges: true, onFinished: { results.append($0) }).apply(Self.desktopOnlySet)
+        #expect(results[0].summary == "移動: 1 件を配置 ・ 自動並べ替えがオンなのでデスクトップ移動を飛ばしました")
+    }
+
+    /// 切替を確かめた番号で spaceDidNotChange が返るのは、遅れた通知で「activate で切り替わった」と誤った場合。
+    /// すでにそこにいるとみなし、失敗にも「切り替わらない番号」にもしない。
+    @Test func 切替を確かめた番号で切り替わらなくても失敗にしない() async {
+        let set = LayoutSet(name: "s", rows: [
+            LayoutRow(bundleIdentifier: "line", appName: "LINE", action: .leftThird, desktop: 3),
+            LayoutRow(bundleIdentifier: "discord", appName: "Discord", action: .centerThird, desktop: 3),
+        ])
+        enumerator.windowsByBundle = ["line": [Self.line], "discord": [Self.discord]]
+        allOnScreen()
+        mover.switchResult = true
+        windows.onRaise = { [mover] _ in mover.spaceChangeCount += 1 }     // 毎回遅れた通知が届く想定
+        mover.error = .spaceDidNotChange(desktop: 3)
+        var results: [LayoutRunResult] = []
+        _ = await makeRunner(onFinished: { results.append($0) }).apply(set)
+        #expect(mover.switchCalls == [3])
+        // 2 行目も自分の raise で数が増えたので move を呼ぶ。unreachable に入っていれば呼ばれない。
+        #expect(mover.calls.count == 2)
+        #expect(results[0].failed.isEmpty)
+        #expect(results[0].summary == "s: 2 件を配置")
     }
 
     /// LINE がデスクトップ 1 にあり、activate で利用者が 1 へ連れ戻される場合。掴んで 3 へ運ぶ。

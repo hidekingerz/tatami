@@ -9,6 +9,8 @@ struct FailedRow: Sendable {
 /// レイアウトセット 1 回分の適用結果。
 struct LayoutRunResult: Sendable {
     let set: LayoutSet
+    /// 成功した行。配置した行に加え、デスクトップ移動だけの行（配置なし）が誤りなく終わったものも入れる。
+    /// 自動並べ替えがオンで移動を飛ばしたデスクトップ移動だけの行は、何もしていないので入れない。
     let placed: [LayoutRow]
     let skipped: [SkippedRow]
     let failed: [FailedRow]
@@ -120,6 +122,8 @@ final class LayoutSetRunner {
         let skipMoves = dockPreferences.rearrangesSpacesAutomatically
         var currentDesktop: Int?
         var unreachable: Set<Int> = []
+        // この実行で switchTo が切替を確かめた番号。
+        var confirmedDesktops: Set<Int> = []
         var lastDesktopWindow: WindowHandle?
         var firstPlacedWindow: WindowHandle?
 
@@ -151,9 +155,11 @@ final class LayoutSetRunner {
                 if let desktop = row.desktop, !skipMoves {
                     try await bring(
                         window, to: desktop, currentDesktop: &currentDesktop, unreachable: &unreachable,
-                        lastDesktopWindow: &lastDesktopWindow
+                        confirmedDesktops: &confirmedDesktops, lastDesktopWindow: &lastDesktopWindow
                     )
                 } else {
+                    // 隠されたアプリの窓は raise しても見えないので先に unhide する（activate する行は activate が行う）。
+                    try windowService.unhide(window)
                     try windowService.raise(window)
                 }
             } catch {
@@ -169,6 +175,9 @@ final class LayoutSetRunner {
                 } catch {
                     record(error)
                 }
+            } else if row.desktop != nil, !skipMoves, rowError == nil {
+                // デスクトップ移動だけの行は、誤りなく運べたら成功として数える。
+                placed.append(row)
             }
             if let rowError {
                 failed.append(FailedRow(row: row, error: rowError))
@@ -191,7 +200,7 @@ final class LayoutSetRunner {
     /// 窓をデスクトップ desktop へ連れていく（設計書 §2.4 手順 5）。失敗は投げる。
     private func bring(
         _ window: WindowHandle, to desktop: Int, currentDesktop: inout Int?, unreachable: inout Set<Int>,
-        lastDesktopWindow: inout WindowHandle?
+        confirmedDesktops: inout Set<Int>, lastDesktopWindow: inout WindowHandle?
     ) async throws {
         // この実行で切り替わらなかった番号へは、掴んで待つことを繰り返さない。
         if unreachable.contains(desktop) {
@@ -199,7 +208,9 @@ final class LayoutSetRunner {
         }
         if currentDesktop != desktop {
             // false は「すでにそこ」か「存在しない」で区別できないので、仮にそこにいるとみなす。
-            _ = try await spaceMover.switchTo(desktop: desktop)
+            if try await spaceMover.switchTo(desktop: desktop) {
+                confirmedDesktops.insert(desktop)
+            }
             currentDesktop = desktop
         }
 
@@ -223,6 +234,10 @@ final class LayoutSetRunner {
         do {
             try await spaceMover.move(window, toDesktop: desktop)
             currentDesktop = desktop
+        } catch SpaceMoveError.spaceDidNotChange(let number) where confirmedDesktops.contains(number) {
+            // この実行で切り替われた番号なのに切り替わらなかったのは、遅れた（または重複した）通知で
+            // 「activate で切り替わった」と誤って判断し、すでにそこにいたため。窓は目的のデスクトップにある。
+            currentDesktop = number
         } catch SpaceMoveError.spaceDidNotChange(let number) {
             unreachable.insert(number)
             throw SpaceMoveError.spaceDidNotChange(desktop: number)

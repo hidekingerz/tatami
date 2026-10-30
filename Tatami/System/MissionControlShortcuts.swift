@@ -33,11 +33,14 @@ struct MissionControlShortcuts: MissionControlShortcutReading {
               let parameters = value["parameters"] as? [Any], parameters.count == 3
         else { return nil }
         let numbers = parameters.compactMap { ($0 as? NSNumber)?.intValue }
-        guard numbers.count == 3, numbers[1] >= 0, numbers[2] >= 0 else { return nil }
+        // 65535 は「キー未割り当て」の印。CGKeyCode（UInt16）に収まらない値も捨てる。
+        guard numbers.count == 3, numbers[2] >= 0, numbers[1] != 65535,
+              let keyCode = CGKeyCode(exactly: numbers[1])
+        else { return nil }
         // 修飾キーのビットは CGEventFlags と同じ値（control 0x40000, option 0x80000, shift 0x20000, command 0x100000）。
         let modifiers = CGEventFlags(rawValue: UInt64(numbers[2]))
             .intersection([.maskControl, .maskAlternate, .maskShift, .maskCommand])
-        return KeyCombo(keyCode: CGKeyCode(numbers[1]), modifiers: modifiers)
+        return KeyCombo(keyCode: keyCode, modifiers: modifiers)
     }
 
     /// 「デスクトップ N へ切り替え」のホットキー ID（デスクトップ 1 が 118）。

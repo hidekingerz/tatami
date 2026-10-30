@@ -59,16 +59,30 @@ struct AccessibilityWindowService: WindowService {
         }
     }
 
-    /// activate の成否（戻り値）は見ない。通ったかどうかは SpaceMover の「見えているか」の確認で分かる。
+    func unhide(_ window: WindowHandle) throws {
+        NSRunningApplication(processIdentifier: try pid(of: window))?.unhide()
+    }
+
+    /// activate の成否は最終的には見ない。通ったかどうかは SpaceMover の「見えているか」の確認で分かる。
     func activate(_ window: WindowHandle) throws {
+        let pid = try pid(of: window)
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        app.unhide()
+        if !app.activate() {
+            // 協調アクティベーションで拒否されたときの保険（Rectangle / yabai と同じ）。結果は見ない。
+            AXUIElementSetAttributeValue(
+                AXUIElementCreateApplication(pid), kAXFrontmostAttribute as CFString, kCFBooleanTrue
+            )
+        }
+    }
+
+    private func pid(of window: WindowHandle) throws -> pid_t {
         var pid: pid_t = 0
         let result = AXUIElementGetPid(window.element, &pid)
         guard result == .success else {
             throw WindowServiceError.axError(result)
         }
-        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
-        app.unhide()
-        app.activate()
+        return pid
     }
 
     private func setAttribute(_ attribute: String, to value: CFTypeRef, of window: WindowHandle) throws {
