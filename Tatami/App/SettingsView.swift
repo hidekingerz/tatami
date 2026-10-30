@@ -43,15 +43,21 @@ struct SettingsView: View {
                 }
                 .tag(SettingsTab.layoutSets(selectedID: nil))
         }
-        .frame(width: 640)
-        .background(SettingsWindowCloseObserver())
+        // 最小 720×600。セットを 1 つ展開しても収まる高さにし、min だけ決めてドラッグで広げられるようにする。
+        .frame(minWidth: 720, minHeight: 600)
+        .background(SettingsWindowConfigurator())
     }
 }
 
-/// 設定ウィンドウが閉じたら tatami を非アクティブにし、前に使っていたアプリへフォーカスを返す。
-/// メニューバーアプリは窓を閉じてもアクティブなままで、そのままだと 27 コマンドが
-/// `NSApp.isActive` の判定で beep してしまうため。ホストしている NSWindow を直接つかんで通知を購読する。
-private struct SettingsWindowCloseObserver: NSViewRepresentable {
+/// ホストしている NSWindow を直接つかんで、設定ウィンドウの振る舞いを 2 つ整える。
+///
+/// 1. `.moveToActiveSpace`: SwiftUI の設定ウィンドウは 1 度作られると使い回され、既定ではそのとき表示していた
+///    デスクトップに所属し続ける。別のデスクトップから「設定…」や ⌘⏎ で開くと、そのデスクトップへ連れ戻されて
+///    使いにくいので、表示されるたびにいまのデスクトップへ移るようにする。
+/// 2. 閉じたら tatami を非アクティブにし、前に使っていたアプリへフォーカスを返す。
+///    メニューバーアプリは窓を閉じてもアクティブなままで、そのままだと 27 コマンドが
+///    `NSApp.isActive` の判定で beep してしまうため。
+private struct SettingsWindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> ObserverView {
         ObserverView()
     }
@@ -68,6 +74,7 @@ private struct SettingsWindowCloseObserver: NSViewRepresentable {
                 self.token = nil
             }
             guard let window else { return }
+            window.collectionBehavior.insert(.moveToActiveSpace)
             token = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification, object: window, queue: .main
             ) { _ in
