@@ -293,7 +293,7 @@ OS に依存する部分をまとめて作り、フラグ付きのデバッグ�
   // WindowService に追加
   func unminimize(_ window: WindowHandle) throws       // kAXMinimizedAttribute = false
   func raise(_ window: WindowHandle) throws            // kAXMainAttribute = true、kAXRaiseAction（アプリはアクティブにしない）
-  func activate(_ window: WindowHandle) throws         // その窓のアプリを unhide() してから activate(options: .activateIgnoringOtherApps) する
+  func activate(_ window: WindowHandle) throws         // その窓のアプリを unhide() してから activate() する。false（協調アクティベーションで拒否）なら kAXFrontmostAttribute = true を書く（macOS 14 以降は .activateIgnoringOtherApps に効果がないため）
 
   enum SpaceMoveError: Error, Equatable, Sendable {
       case shortcutDisabled(desktop: Int)
@@ -500,7 +500,7 @@ WezTerm は `window_decorations` の設定値も報告してもらう（`RESIZE`
 - 1 / 1' が × のアプリ: ログの候補点番号を見て、`grabCandidates` の順や座標を調整して再試行。全滅なら設計書 §8 のとおり利用者に相談する（スペース移動を落とすか）。
 - 1' の方が安定なら `dragOffset` の既定を 2 にする。
 - 切替が間に合わない（`spaceDidNotChange` なのに目視では切り替わった）: `spaceChangeTimeout` を 2 秒に増やして再試行。
-- 5 が ×: `activate` を `activate(options: [.activateIgnoringOtherApps])` に変えて再試行。それでも × なら設計書 §2.4 手順 5 に「別デスクトップの窓は回収できない」と書き、利用者に相談する。
+- 5 が ×: `activate` が false のときアプリの AX 要素に `kAXFrontmostAttribute = true` を書く保険を確かめて再試行（`.activateIgnoringOtherApps` は macOS 14 以降は効果がない）。それでも × なら設計書 §2.4 手順 5 に「別デスクトップの窓は回収できない」と書き、利用者に相談する。
 - 6 で別アプリの窓が動いたら Critical。`isOnScreen` の突き合わせとヒットテストを見直し、直るまで Task 7 以降に進まない。
 - 確定した値を `SpaceMoverTiming` の既定値と `grabCandidates` に入れ、設計書 §5 を更新してコミットする:
 
@@ -818,7 +818,7 @@ struct LayoutSetPlannerTests {
         #expect(plan.steps.map(\.window) == [Self.wez1, Self.wez2])
     }
 
-    @Test func 3行目は窓が尽きてnoMatchingWindow() {
+    @Test func 三行目は窓が尽きてnoMatchingWindow() {
         let set = LayoutSet(name: "s", rows: [row("wez"), row("wez"), row("wez")])
         let plan = LayoutSetPlanner.plan(set, windowsByBundle: Self.windows)
         #expect(plan.steps.count == 2)
@@ -1315,7 +1315,7 @@ struct LayoutSetRunnerTests {
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-テスト実行（`LayoutSetRunnerTests`）。Expected: 13 件 PASS。
+テスト実行（`LayoutSetRunnerTests`）。Expected: 15 件 PASS。
 
 - [ ] **Step 5: コミット**
 
@@ -1644,7 +1644,7 @@ struct PickerStateTests {
 `PickerView`: モックに従う。上に `TextField`（プレースホルダ「レイアウトセットを検索…」、右に「N セット」）、中に行（`RegionGlyph(actions: set.rows.compactMap(\.action))` 幅 48 高さ 32、名前、要約「`appName` `action.title`」を「 ・ 」でつないだもの、`desktop` があるものは「デスクトップ N」のバッジ、キーは `KeyboardShortcuts.getShortcut(for: set.shortcutName)?.description` か「未割当」）、下にヒント「⏎ 適用  ↑↓ 選択  →← 内訳  ⌘⏎ 編集  esc 閉じる」。選択行は `Color.accentColor` で塗り、文字は反転色。`expandedID` の行は下に各行の「appName / action.title / デスクトップ N」を縦に並べる。行のクリックで `onApply`。セットが 0 件なら「設定でセットを作ってください」と Enter で `onEdit(nil)`。
 
 `PickerPanel`: `styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel]` は使わず `[.borderless]`、`level = .floating`、`collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]`、`isMovable = false`、幅 620。`canBecomeKey` を true に上書き。`resignKey` で閉じる。
-`toggle` は開く前に `NSWorkspace.shared.frontmostApplication` を `previousApp` に覚え、`NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)` → `makeKeyAndOrderFront` → 検索欄へフォーカス。`close()` は `orderOut` のあと `previousApp?.activate()` で元のアプリに戻す（メニューバーアプリは窓を閉じてもアクティブなままで、戻さないと既存コマンドが beep し続ける）。`onApply` の前に `close()`。
+`toggle` は開く前に `NSWorkspace.shared.frontmostApplication` を `previousApp` に覚え、`NSApp.activate()`（`.activateIgnoringOtherApps` は macOS 14 以降は効果がないため）→ `makeKeyAndOrderFront` → 検索欄へフォーカス。`close()` は `orderOut` のあと `previousApp?.activate()` で元のアプリに戻す（メニューバーアプリは窓を閉じてもアクティブなままで、戻さないと既存コマンドが beep し続ける）。`onApply` の前に `close()`。
 キー操作は検索欄が first responder でもフィールドエディタに食われないよう、`PickerView` のルートに `.onKeyPress(.upArrow)` / `.downArrow` / `.return` / `.escape` / `.rightArrow` / `.leftArrow` を付けて処理する（`.return` は `modifiers` に `.command` が含まれれば `onEdit`）。`NSPanel.keyDown` の上書きには頼らない。
 
 `AppModel.openPicker()`: `picker.toggle()`。`onApply` は `apply(set)`、`onEdit` は設定を開く。ピッカーは `App` のシーン外なので `@Environment(\.openSettings)` が直接使えない。2 案を両方入れ、実機で動く方を残す:

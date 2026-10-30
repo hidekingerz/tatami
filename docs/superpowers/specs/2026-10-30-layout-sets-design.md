@@ -107,10 +107,15 @@ macOS は「いまデスクトップ何番か」「この窓はデスクトッ�
       2. `currentDesktop != N` なら、何も掴まずに ⌃N だけを送って利用者を N へ移す（§5 の `switchTo`）。切替の通知が来れば `currentDesktop = N`。
          来なければ「すでに N にいる」か「N が存在しない」かは分からないので、仮に `currentDesktop = N` とする。
       3. アプリをアクティブにして窓を raise し、窓がいまのデスクトップに見えるまで待つ（§5 手順 3）。
-         activate が別デスクトップへの切替を起こすと通知が来て `currentDesktop` は nil になる。
+         見えたらさらに `settleInterval`（既定 300 ms）待ってから、raise の前に控えた `spaceChangeCount` と比べる
+         （activate が起こした切替の通知は窓が見えるより遅れて届くことがあるため）。
+         activate が別デスクトップへの切替を起こしていれば、カウンタが増えているので `currentDesktop` を nil にする。
       4. 見えていて `currentDesktop == N` なら、窓はもう N にある。移動しない（成功）。
       5. 見えていて `currentDesktop == nil` なら、§5 の `move` でタイトルバーを掴んで ⌃N を送る。成功すれば `currentDesktop = N`。
          `spaceDidNotChange(N)` なら N を `unreachableDesktops` に入れる（存在しない番号で行ごとに 1 秒掴み続けない）。
+         ただし N が `confirmedDesktops`（この実行で `switchTo(N)` が true を返した番号）に入っていれば、N は存在する。
+         遅れた・重複した通知で「activate で切り替わった」と誤って判断し、すでに N にいたとみなす:
+         `unreachableDesktops` に入れず、失敗も記録せず、`currentDesktop = N` として続ける。
       6. 見えなければ `windowNotOnScreen` として「失敗」。
       失敗しても手順 6 の配置は行う（少なくとも並ぶことを優先する）。
    6. `action` があれば、窓がいまある画面の visibleFrame で `LayoutCalculator.frame(for:in:current:)` を計算し、
@@ -125,7 +130,7 @@ macOS は「いまデスクトップ何番か」「この窓はデスクトッ�
 - アクセシビリティ権限がなければ、既存コマンドと同じく権限を要求して何もしない。
 - 適用中は同じセットの再適用を受け付けない（二重に走らせない）。別のセットや単発コマンドも、適用中は無視して beep する。
 - 既存の `CycleMemory`（ループ系の記憶）は適用の最後にクリアする。配置が変わったあとに古い記憶でループが続くのを避ける。
-- `bundleIdentifier` が通常アプリでない（`activationPolicy != .regular`）行は「起動していないか、通常のアプリではありません」と出す。
+- `bundleIdentifier` が通常アプリでない（`activationPolicy != .regular`）行は起動していないものとして扱い、「<app> は起動していません」と出す。
 
 ### 2.5 結果の表示
 
@@ -133,6 +138,8 @@ macOS は「いまデスクトップ何番か」「この窓はデスクトッ�
   例: 「連絡: 3 件中 2 件を配置 ・ Teams は起動していません」。全件成功なら「連絡: 3 件を配置」。
 - 飛ばした理由は「起動していない」「合う窓がない」「フルスクリーン」と、失敗の各種（§5 の `SpaceMoveError` ごとに文言を持つ）。
   行の順に「 ・ 」でつなぐ。表示時間は文字数に応じて 2〜4 秒。
+- 件数の「配置」には、区画を適用できた行に加え、デスクトップ移動だけの行（区画は「変えない」）が誤りなく終わったものも入れる。
+  自動並べ替えがオンで移動を飛ばしたときは、その行は何もしていないので数えない。
 - 通知センター（UserNotifications）は使わない。権限の確認が増えるわりに、見たいのはその瞬間だけのため。
 
 ### 2.6 セットの作り方
@@ -179,6 +186,11 @@ macOS は「いまデスクトップ何番か」「この窓はデスクトッ�
   確認なしには実行しない。オフなら警告は出ず、設計どおり番号で運ぶ。
   （レビューでは「個人ユーティリティが Dock を再起動する経路を持つのは責任範囲を超える。システム設定を開くだけでよい」という指摘があった。
   利用者がボタンを望んだため残すが、書き込みはテスト対象外であり、失敗したらその旨を表示して利用者にシステム設定を案内する。）
+- Mission Control の「アプリケーションの切り替えで、アプリケーションのウインドウが開いているスペースに切り替える」
+  （`com.apple.dock` の `workspaces-auto-swoosh`、未設定ならオン）がオフだと、activate しても別デスクトップの窓の側へ切り替わらず、
+  窓を回収できない（§2.4 手順 5.3 が前提とする挙動）。tatami はこの値を読み、オフでデスクトップ番号を持つ行があれば
+  「セット」タブに「Mission Control の「アプリケーションの切り替えで、アプリケーションのウインドウが開いているスペースに切り替える」がオフです。
+  オンでないと別デスクトップの窓を回収できません。」と出し、システム設定（デスクトップと Dock）を開くボタンを添える。書き込みはしない。
 - デスクトップ番号は Mission Control の並び全体の通し番号で、複数ディスプレイでは別のディスプレイのデスクトップを指すことがある。
   複数ディスプレイでのデスクトップ指定は本設計の対象外とし、README には「番号は Mission Control の並びの通し番号」と書く。
 
@@ -190,7 +202,8 @@ macOS は「いまデスクトップ何番か」「この窓はデスクトッ�
 - スリープ復帰やディスプレイ接続をきっかけにした自動適用。
 - セットのエクスポート/インポート、iCloud 同期。
 - Stage Manager。フルスクリーンの窓は AX の一覧に含まれるので、`kAXFullScreenAttribute` で見分けて「フルスクリーン」として飛ばす（対象にはしない）。
-- デスクトップの総数の検出（`com.apple.spaces` の plist は macOS のバージョンで形が変わるため読まない）。存在しない番号への移動は §5 の成否検知で「失敗」になる。
+- デスクトップの総数の検出（`com.apple.spaces` の plist は macOS のバージョンで形が変わるため読まない）。存在しない番号への移動は §5 の成否検知で通常は「切り替わりませんでした」になる。
+  ただし対象の窓がいまのデスクトップにある場合は、移動の必要がないと判断して成功と表示されることがある（番号の存在を公開 API で確かめられないため）。
 - ピッカーでの曖昧検索、使用頻度順の並び替え。
 
 ## 3. アーキテクチャ
@@ -384,6 +397,7 @@ enum SpaceMoveError: Error, Equatable, Sendable {
     case spaceDidNotChange(desktop: Int)  // キーを送ってもデスクトップが切り替わらない（存在しない番号、またはすでにそこ）
     case windowLeftBehind                 // 切り替わったが窓が付いてこなかった
     case eventPostFailed
+    case frameUnreadable                  // 掴む点を決めるための窓の枠が読めない
 }
 ```
 
@@ -442,7 +456,7 @@ struct FailedRow: Sendable { let row: LayoutRow; let error: any Error }
 
 struct LayoutRunResult: Sendable {
     let set: LayoutSet
-    let placed: [LayoutRow]            // action を適用できた行
+    let placed: [LayoutRow]            // action を適用できた行と、誤りなく終わったデスクトップ移動だけの行（§2.5）
     let skipped: [SkippedRow]          // 照合で飛ばした行
     let failed: [FailedRow]            // 移動または配置で例外が出た行（placed と重なりうる）
     let skippedDesktopMoves: Bool      // 自動並べ替えがオンでデスクトップ移動を飛ばした
@@ -451,7 +465,7 @@ struct LayoutRunResult: Sendable {
 ```
 
 - §2.4 の順で進める。`onStarted` は「適用中…」の HUD 用。
-- 実行中の状態 `currentDesktop: Int?` と `unreachableDesktops: Set<Int>` は `apply` のローカルに持ち、実行をまたいで残さない。
+- 実行中の状態 `currentDesktop: Int?`、`unreachableDesktops: Set<Int>`、`confirmedDesktops: Set<Int>` は `apply` のローカルに持ち、実行をまたいで残さない。
 - `async` にするのは §5 の待ちのため。AX 呼び出し自体はメインアクターで行う。
 - `windows(ofBundleIdentifier:)` が nil（起動していない）なら `windowsByBundle` にキーを入れず、`[]`（窓なし）ならキーを入れて空配列にする。
   起動しているが窓のないアプリに「起動していません」と出さないため。
@@ -508,12 +522,18 @@ enum ShortcutRegistrar {
   フォーカスを失ったら閉じる。
 - 開くときに前面だったアプリ（`NSWorkspace.shared.frontmostApplication`）を覚え、閉じるとき（esc、フォーカス喪失、適用）にそれをアクティブに戻す。
   メニューバーアプリは窓を閉じてもアクティブなままなので、戻さないと既存コマンドが beep し続ける。
-  tatami 自身のアクティブ化は `NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)` を使う（グローバルキーからの `NSApp.activate()` は拒否されることがある）。
+  ただしフォーカス喪失（`resignKey`）で戻すのは tatami がまだ前面のときだけ。利用者が別のアプリをクリックした場合はそのアプリに任せる
+  （戻すとクリックしたアプリからフォーカスを奪う）。
+  tatami 自身のアクティブ化は `NSApp.activate()`、元のアプリへ戻すのは `app.activate()` を使う
+  （`.activateIgnoringOtherApps` は macOS 14 以降は効果がないため）。適用で窓をアクティブにするとき（`WindowService.activate`）は、
+  協調アクティベーションで拒否されたら（`activate()` が false）アプリの AX 要素に `kAXFrontmostAttribute = true` を書いて保険にする（Rectangle / yabai と同じ）。
 - キー操作（↑↓ / ⏎ / esc / → / ← / ⌘⏎）は検索欄が first responder でも効く必要がある。フィールドエディタが先に消費するので
   `NSPanel.keyDown` の上書きでは届かない。SwiftUI の `.onKeyPress` を検索欄を含むルートに付けるか、`NSEvent.addLocalMonitorForEvents(matching: .keyDown)` で拾う。
 - ⌘⏎ で設定画面を開く経路は、ピッカーが `App` のシーン外にあるため `@Environment(\.openSettings)` が直接使えない。
   `MenuBarView` が表示されたときに `openSettings` を `AppModel` に預ける方法と、`NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)` の
   2 案を実装し、実機で動く方を採る（前者はメニューを一度も開いていないと使えない）。
+  どちらかを試したあと 0.5 秒待ち、key window がないのに tatami がアクティブなままなら `NSApp.deactivate()` する
+  （後者が効かなかったときに、窓のないまま tatami が前面に残って 27 コマンドが beep し続けないように）。
 - 中身は SwiftUI（`NSHostingView`）。見た目はモックに従う。アクセント色は `Color.accentColor`。
   行のグリフは `RegionGlyph` を拡張し、複数の区画を 1 枚に重ねて描けるようにする（`RegionGlyph(actions: [SnapAction])`）。
 - 選択中の行は塗りつぶし、未選択は透明。デスクトップ番号は枠線のバッジ、キーは角丸の小さなラベル、未割当なら「未割当」。
@@ -526,7 +546,7 @@ enum ShortcutRegistrar {
 - 上部: 「ピッカーを開く」の `KeyboardShortcuts.Recorder`。その下に、§2.8 の警告（該当があるときだけ）。
 - 中央: セットの一覧（`List`）。各セットは `DisclosureGroup` で、ヘッダに名前（インライン編集可）と `Recorder`、
   開くと行の一覧と「行を追加」。行は `LayoutRowEditor`。
-- 行のエディタ: アプリの `Picker`（起動中の通常アプリを名前順。先頭に「bundle identifier を入力…」）、
+- 行のエディタ: アプリの `Picker`（起動中の通常アプリを名前順。末尾に「bundle identifier を入力…」）、
   絞り込みの `TextField`（プレースホルダ「タイトルに含む文字（任意）」）、
   区画の `Menu`（カテゴリごとのサブメニュー、各項目に `RegionGlyph` と `SnapCommand.title` に対応する区画名。先頭に「変えない」）、
   デスクトップの `Picker`（「変えない」、1〜10）、削除ボタン。行は `onMove` で並び替え。
@@ -559,7 +579,7 @@ enum ShortcutRegistrar {
 **`switchTo(desktop:)`**（何も掴まずに利用者だけ移す）:
 
 1. キーを読む。nil なら `shortcutDisabled`。
-2. 修飾キーが離されるまで待つ（下の手順 2 と同じ）。
+2. 修飾キーが離されるまで待つ（下の手順 2 と同じ）。続けて `spaceChangeCount` が落ち着くまで待つ（下の手順 2 と同じ）。
 3. `spaceChangeCount` を控え、`keyDown` → `keyUp` を送る。
 4. カウンタが増えるのを `spaceChangeTimeout` まで待つ。増えれば `afterSpaceChange` 待って true、増えなければ false（例外にしない。
    「すでにそこ」と「存在しない」は区別できず、どちらも呼び出し側が扱う）。
@@ -570,9 +590,13 @@ enum ShortcutRegistrar {
 2. 修飾キー（control / option / shift / command）が離されるまで待つ（`CGEventSource.flagsState(.combinedSessionState)` を 20 ms 間隔で、上限 1 秒）。
    超えたら `modifiersHeld`。押したまま ⌃N を送ると ⌃⌥N になり何も起きないため、黙って進まない。
    利用者が物理的にマウスボタンを押している（`CGEventSource.buttonState(.combinedSessionState, button: .left)`）間も同様に待ち、超えたら `interrupted`。
+   続けて、`spaceChangeCount` が `settleInterval`（既定 300 ms）のあいだ変わらなくなるまで待つ（上限 `settleTimeout` 1 秒。超えたらそのまま進む）。
+   activate が起こした切替の通知は遅れて届くことがあり、落ち着く前に控えたカウンタでは 9 の待ちがその通知で即座に真になって、
+   運べていないのに成功と報告してしまうため。マウスボタンを押す前に待ち、3 の「見えているか」の確認はこのあとで行う
+   （落ち着く間に切替が起きると窓の位置関係が変わりうる）。
 3. 窓がいまのデスクトップに見えるまで待つ（`WindowEnumerating.isOnScreen` を 20 ms 間隔で、上限 1 秒。
    raise によるデスクトップ切替や最小化復帰のアニメーションが終わるのを待つ）。超えたら `windowNotOnScreen`。
-4. 窓の現在枠を読み直し、掴む点の候補を順に試す: (a) `minX + 80, minY + 10`（信号機の右）、(b) `midX, minY + 10`（タイトルバー中央）、
+4. 窓の現在枠を読み直し（読めなければ `frameUnreadable`）、掴む点の候補を順に試す: (a) `minX + 80, minY + 10`（信号機の右）、(b) `midX, minY + 10`（タイトルバー中央）、
    (c) `maxX - 40, minY + 10`（右端）、(d) `midX, minY + 6`（上端の帯。タブ付きブラウザの空き。3 pt だとリサイズ領域に掛かる）。
    各候補で `AXUIElementCopyElementAtPosition(systemWide, x, y)` を取り、要素の `kAXRoleAttribute` が `AXWindow` ならその要素自身を、
    それ以外なら `kAXWindowAttribute` を目的の窓と `CFEqual` で比べる。一致し、かつロールが**許可リスト**
@@ -661,7 +685,9 @@ tatami 本体のメニューに、`defaults write dev.hidekingerz.tatami debugMe
 
 - README に「レイアウトセット」の節を足す: 作り方、ピッカー、デスクトップ移動の仕組みと制約
   （Mission Control ショートカットをオンにする、番号は Mission Control の並びの通し番号で複数ディスプレイは対象外、
-  存在しない番号は「切り替わりませんでした」になる、セキュア入力中は移動できない、同じ枠の窓が 2 枚あると掴めないことがある、
+  存在しない番号は通常「切り替わりませんでした」になるが、対象の窓がいまのデスクトップにある場合は成功と表示されることがある
+  （番号の存在を公開 API で確かめられないため）、
+  「アプリケーションの切り替えで、アプリケーションのウインドウが開いているスペースに切り替える」をオンにする、セキュア入力中は移動できない、同じ枠の窓が 2 枚あると掴めないことがある、
   タイトルバーのないアプリは移動できない）。
 - 設定画面のウィンドウ幅の変更を既存の実機確認項目に反映する。
 
