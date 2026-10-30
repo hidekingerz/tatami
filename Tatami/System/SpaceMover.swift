@@ -19,6 +19,8 @@ enum SpaceMoveError: Error, Equatable, Sendable {
     case windowLeftBehind
     /// CGEvent を作れなかった。
     case eventPostFailed
+    /// 窓の枠を読めなかった（WindowService の失敗）。
+    case frameUnreadable
 }
 
 /// SpaceMover の待ち時間。既定値はスパイクで決める。
@@ -32,10 +34,15 @@ struct SpaceMoverTiming: Sendable {
     var afterSpaceChange: Duration = .milliseconds(150)
     var leftBehindTimeout: Duration = .milliseconds(500)
     var pollInterval: Duration = .milliseconds(20)
+    /// キー送信前に spaceChangeCount がこの間変わらなければ「落ち着いた」とみなす。
+    var settleInterval: Duration = .milliseconds(300)
+    /// 落ち着くのを待つ上限。超えたらそのまま進む。
+    var settleTimeout: Duration = .seconds(1)
 }
 
 /// デスクトップの切替と、窓を掴んだままの切替による移動。
 @MainActor
+/// 投げるのは SpaceMoveError か、キャンセル時の CancellationError のみ。
 protocol SpaceMoving {
     /// activeSpaceDidChangeNotification が来るたびに増える。Runner は raise の前後で比べて、自分以外の切替を検知する。
     var spaceChangeCount: Int { get }
@@ -110,6 +117,7 @@ final class CGEventSpaceMover: SpaceMoving {
             throw SpaceMoveError.shortcutDisabled(desktop: desktop)
         }
         try await waitForModifierRelease()
+        try await waitForSpaceCountToSettle()
         let before = spaceChangeCount
         try postKey(combo)
         guard await waitForSpaceChange(since: before, timeout: timing.spaceChangeTimeout) else {
@@ -127,12 +135,22 @@ final class CGEventSpaceMover: SpaceMoving {
         }
         // 2. 修飾キーとマウスボタンが離されるまで待つ。
         try await waitForModifierRelease()
+        // 遅れて届く activate 由来の通知を自分の切替と取り違えないよう、カウンタが落ち着くまで待つ。
+        // 窓は通知より先に見えるようになるため、落ち着く前に控えた before では 9 の待ちが即座に真になり、
+        // 運べていないのに成功と報告してしまう。マウスボタンを押す前に待つ（押したまま待たない）。
+        // 落ち着く間に切替が起きると窓の位置関係が変わりうるので、3・4 の確認はこのあとで行う。
+        try await waitForSpaceCountToSettle()
         // 3. 窓がいまのデスクトップに見えるまで待つ（raise による切替や最小化復帰のアニメーション待ち）。
         guard try await poll(timeout: timing.onScreenTimeout, until: { self.enumerator.isOnScreen(window) }) else {
             throw SpaceMoveError.windowNotOnScreen
         }
         // 4. 掴む点の直下がこの窓で、部品でないことを確かめる。
-        let frame = try windowService.frame(of: window)
+        let frame: CGRect
+        do {
+            frame = try windowService.frame(of: window)
+        } catch {
+            throw SpaceMoveError.frameUnreadable
+        }
         guard let (index, grabPoint) = findGrabPoint(on: window, frame: frame) else {
             throw SpaceMoveError.noGrabPoint
         }
@@ -190,6 +208,22 @@ final class CGEventSpaceMover: SpaceMoving {
     }
 
     // MARK: - 待ち
+
+    /// spaceChangeCount が settleInterval のあいだ変わらなくなるまで pollInterval ずつ待つ。
+    /// settleTimeout を超えても変わり続けるなら、そのまま進む。
+    private func waitForSpaceCountToSettle() async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timing.settleTimeout
+        var lastCount = spaceChangeCount
+        var stableSince = clock.now
+        while clock.now - stableSince < timing.settleInterval, clock.now < deadline {
+            try await Task.sleep(for: timing.pollInterval)
+            if spaceChangeCount != lastCount {
+                lastCount = spaceChangeCount
+                stableSince = clock.now
+            }
+        }
+    }
 
     /// 修飾キーとマウス左ボタンが離されるまで待つ。上限を超えたら、修飾キーなら modifiersHeld、ボタンなら interrupted。
     private func waitForModifierRelease() async throws {
