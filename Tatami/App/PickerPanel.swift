@@ -74,9 +74,11 @@ final class PickerPanel: NSPanel {
     }
 
     /// フォーカスを失ったら閉じる（別のアプリをクリックした、など）。
+    /// 元のアプリに戻すのは tatami がまだ前面のときだけ。利用者が別アプリをクリックした場合は
+    /// そのアプリに任せる（戻すと、クリックしたアプリからフォーカスを奪ってしまう）。
     override func resignKey() {
         super.resignKey()
-        close()
+        dismiss(restoringPreviousApp: NSApp.isActive)
     }
 
     /// 検索欄のフィールドエディタが esc を `cancelOperation:` にして送ってきた場合の受け口。
