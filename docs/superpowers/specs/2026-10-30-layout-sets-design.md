@@ -544,15 +544,24 @@ enum ShortcutRegistrar {
 - 既存の `TabView` の末尾にタブを足す。アイコンは `rectangle.3.group`（SF Symbols）。
   タブごとの幅は変えられないので、ウィンドウを最小 720×600 にし、ドラッグで広げられるようにする（セットを 1 つ展開しても収まる高さ）。
   既存タブは `Form` なので広がっても崩れない。
+  `Settings` シーンの窓は `.windowResizability(.contentMinSize)` を付けても styleMask に `.resizable` が入らない
+  （SwiftUI が titled|closable|fullSizeContentView で作り直す）ので、ホストの NSWindow をつかんで
+  `didUpdateNotification` のたびに `.resizable` を足し直す。
   設定ウィンドウには `.moveToActiveSpace` を付け、別のデスクトップから開いたときにそのデスクトップへ移るようにする
   （SwiftUI の設定ウィンドウは使い回され、既定では最初に表示したデスクトップに所属し続けるため、開くたびにそこへ連れ戻される）。
 - 上部: 「ピッカーを開く」の `KeyboardShortcuts.Recorder`。その下に、§2.8 の警告（該当があるときだけ）。
-- 中央: セットの一覧（`List`）。各セットは `DisclosureGroup` で、ヘッダに名前（インライン編集可）と `Recorder`、
-  開くと行の一覧と「行を追加」。行は `LayoutRowEditor`。
-- 行のエディタ: アプリの `Picker`（起動中の通常アプリを名前順。末尾に「bundle identifier を入力…」）、
-  絞り込みの `TextField`（プレースホルダ「タイトルに含む文字（任意）」）、
-  区画の `Menu`（カテゴリごとのサブメニュー、各項目に `RegionGlyph` と `SnapCommand.title` に対応する区画名。先頭に「変えない」）、
-  デスクトップの `Picker`（「変えない」、1〜10）、削除ボタン。行は `onMove` で並び替え。
+- 中央: セットの一覧（`List`）。各セットは `DisclosureGroup` で、ヘッダにセット全体の区画を重ねた `RegionGlyph`
+  （ピッカーと同じ絵）、名前（インライン編集可）、`Recorder`。開くと列見出し（アプリ / タイトルに含む文字 / 区画 / デスクトップ）、
+  行の一覧、最後に「行を追加」と「セットを削除」。行は `LayoutRowEditor`。
+  セットの削除はヘッダに置かない。`DisclosureGroup` のラベルにボタンがあると、行全体の「押す」操作
+  （アクセシビリティ、Space キー）がそのボタンに回され、開くつもりでセットが消える（実機で再現）。
+  ヘッダの右クリックメニューにも「セットを削除」を出す。
+- 行のエディタ: 1 行に横並び。列幅は `LayoutRowColumns` で見出しと共有する（タイトルの列だけ残り全部）。
+  アプリの `Picker`（起動中の通常アプリを名前順。末尾に「bundle identifier を入力…」）、
+  絞り込みの `TextField`（プレースホルダ「絞り込まない」）、
+  区画の `Menu`（カテゴリごとのサブメニュー、各項目とラベルに区画の画像と `SnapCommand.title` に対応する区画名。先頭に「変えない」）、
+  デスクトップの `Picker`（ラベルなし。「変えない」、1〜10）、削除ボタン。行は `onMove` で並び替え。
+  注意書き（何もしない行、同じアプリの重複）は行の下にキャプションで出す。
 - 下部: 「セットを追加」「いまの配置を保存」。後者は押すと §2.6 の番号を聞くシートを出し、確定で新しいセットを編集状態で開く。
 - 区画名は既存の `SnapCommand.title` と揃える。`SnapAction` には表示名がないので、`SnapAction.title` を足し、
   単発コマンドと同じ文字列にする（例: `.leftTwoThirds` → 「左 2/3」、`.leftHalf` → 「左半分」）。

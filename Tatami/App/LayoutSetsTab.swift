@@ -218,6 +218,18 @@ struct LayoutSetEditor: View {
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             let ambiguous = ambiguousBundleIDs
+            // 列見出し。行は列幅をそろえた表として読めるようにする（LayoutRowColumns）。
+            if !set.rows.isEmpty {
+                HStack(spacing: LayoutRowColumns.spacing) {
+                    Text("アプリ").frame(width: LayoutRowColumns.app, alignment: .leading)
+                    Text("タイトルに含む文字").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("区画").frame(width: LayoutRowColumns.region, alignment: .leading)
+                    Text("デスクトップ").frame(width: LayoutRowColumns.desktop, alignment: .leading)
+                    Color.clear.frame(width: LayoutRowColumns.remove)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             ForEach(set.rows) { row in
                 LayoutRowEditor(
                     row: row,
@@ -236,24 +248,39 @@ struct LayoutSetEditor: View {
             .onMove { offsets, destination in
                 edit { set in set.rows.move(fromOffsets: offsets, toOffset: destination) }
             }
-            Button("行を追加") {
-                edit { set in set.rows.append(LayoutRow(bundleIdentifier: "", appName: "")) }
-            }
-        } label: {
             HStack {
+                Button {
+                    edit { set in set.rows.append(LayoutRow(bundleIdentifier: "", appName: "")) }
+                } label: {
+                    Label("行を追加", systemImage: "plus.circle")
+                }
+                Spacer()
+                // 削除はヘッダに置かない。DisclosureGroup のラベルにボタンがあると、行全体の「押す」操作
+                // （アクセシビリティや Space キー）がそのボタンに回され、開くつもりでセットが消える。
+                Button(role: .destructive) {
+                    store.remove(id: set.id)
+                } label: {
+                    Label("セットを削除", systemImage: "trash")
+                }
+            }
+            .buttonStyle(.borderless)
+        } label: {
+            HStack(spacing: 10) {
+                // セット全体の区画を 1 枚の画面に重ねた図。ピッカーと同じ絵で、閉じていても中身の見当が付く。
+                RegionGlyph(actions: set.rows.compactMap(\.action))
+                    .size(width: 32, height: 20)
                 TextField("セット名", text: Binding(
                     get: { set.name },
                     set: { name in edit { set in set.name = name } }
                 ))
                 .labelsHidden()
+                .help("クリックして名前を変更")
                 KeyboardShortcuts.Recorder(for: set.shortcutName)
-                Button(role: .destructive) {
+            }
+            .contextMenu {
+                Button("セットを削除", role: .destructive) {
                     store.remove(id: set.id)
-                } label: {
-                    Image(systemName: "trash")
                 }
-                .buttonStyle(.borderless)
-                .help("セットを削除")
             }
         }
     }
@@ -267,7 +294,17 @@ struct LayoutSetEditor: View {
     }
 }
 
-/// 1 行分の編集欄: アプリ / タイトルの絞り込み / 区画 / デスクトップ / 削除。
+/// 行の列幅。見出し行（LayoutSetEditor）と各行（LayoutRowEditor）で共有し、表として縦にそろえる。
+/// タイトルの列だけ幅を決めず、残りを全部使う。
+enum LayoutRowColumns {
+    static let app: CGFloat = 170
+    static let region: CGFloat = 130
+    static let desktop: CGFloat = 72
+    static let remove: CGFloat = 16
+    static let spacing: CGFloat = 10
+}
+
+/// 1 行分の編集欄。1 行に アプリ / タイトルの絞り込み / 区画 / デスクトップ / 削除 を並べ、注意書きはその下に出す。
 struct LayoutRowEditor: View {
     /// アプリの Picker で「bundle identifier を入力…」を表す tag。bundle identifier と重ならない値にする。
     private static let customBundleIDTag = "\u{0}custom"
@@ -280,23 +317,25 @@ struct LayoutRowEditor: View {
     @State private var isEnteringBundleID = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                if isEnteringBundleID {
-                    TextField("bundle identifier", text: Binding(
-                        get: { row.bundleIdentifier },
-                        set: { id in
-                            var updated = row
-                            updated.bundleIdentifier = id
-                            updated.appName = Self.appName(for: id)
-                            onChange(updated)
-                        }
-                    ))
-                    .onSubmit { isEnteringBundleID = false }
-                    .frame(width: 200)
-                } else {
-                    appPicker
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: LayoutRowColumns.spacing) {
+                Group {
+                    if isEnteringBundleID {
+                        TextField("bundle identifier", text: Binding(
+                            get: { row.bundleIdentifier },
+                            set: { id in
+                                var updated = row
+                                updated.bundleIdentifier = id
+                                updated.appName = Self.appName(for: id)
+                                onChange(updated)
+                            }
+                        ))
+                        .onSubmit { isEnteringBundleID = false }
+                    } else {
+                        appPicker
+                    }
                 }
+                .frame(width: LayoutRowColumns.app, alignment: .leading)
                 TextField("タイトル", text: Binding(
                     get: { row.titleFilter },
                     set: { filter in
@@ -304,29 +343,36 @@ struct LayoutRowEditor: View {
                         updated.titleFilter = filter
                         onChange(updated)
                     }
-                ), prompt: Text("タイトルに含む文字（任意）"))
+                ), prompt: Text("絞り込まない"))
                 .labelsHidden()
+                .frame(maxWidth: .infinity)
+                regionMenu
+                    .frame(width: LayoutRowColumns.region, alignment: .leading)
+                desktopPicker
+                    .frame(width: LayoutRowColumns.desktop, alignment: .leading)
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "minus.circle")
                 }
                 .buttonStyle(.borderless)
+                .frame(width: LayoutRowColumns.remove)
                 .help("行を削除")
             }
-            HStack {
-                regionMenu
-                desktopPicker
-                if row.isNoOp {
-                    Text("何もしない")
-                }
-                Spacer()
+            if row.isNoOp {
+                hint("区画もデスクトップも変えないので、この行は何もしません")
             }
             if showsDuplicateHint {
-                Text("同じアプリが複数あります。区別するなら絞り込みを入れてください")
-                    .font(.caption)
+                hint("同じアプリが複数あります。区別するならタイトルで絞り込んでください")
             }
         }
         .foregroundStyle(row.isNoOp ? .secondary : .primary)
         .padding(.vertical, 2)
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, LayoutRowColumns.app + LayoutRowColumns.spacing)
     }
 
     /// 起動中の通常アプリを名前順に。同じ bundle identifier は 1 つにまとめる。
@@ -369,7 +415,6 @@ struct LayoutRowEditor: View {
             Text("bundle identifier を入力…").tag(Self.customBundleIDTag)
         }
         .labelsHidden()
-        .frame(width: 200)
     }
 
     private var currentAppLabel: String {
@@ -397,13 +442,15 @@ struct LayoutRowEditor: View {
                 }
             }
         } label: {
-            HStack(spacing: 6) {
-                if let action = row.action {
-                    RegionGlyph(action: action, isEnabled: !row.isNoOp)
+            // Menu のラベルでは Canvas が描かれないので、項目と同じ NSImage を使う。
+            if let action = row.action {
+                Label {
                     Text(action.title)
-                } else {
-                    Text("変えない")
+                } icon: {
+                    Image(nsImage: RegionMenuImages.image(for: action))
                 }
+            } else {
+                Text("変えない")
             }
         }
         .fixedSize()
@@ -423,6 +470,7 @@ struct LayoutRowEditor: View {
                 Text("\(number)").tag(Int?.some(number))
             }
         }
+        .labelsHidden()
         .fixedSize()
     }
 

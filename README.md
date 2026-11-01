@@ -49,7 +49,7 @@ Raycast の Window Management と同じ区画が使えます。コマンドは�
 - セットごとにショートカットキーを割り当てられます。「ピッカーを開く」はグローバルなキーで、初期状態では割り当てがありません。メニューバーにも「レイアウトセット…」と各セットが並びます。
 
 <p align="center">
-  <img src="docs/images/layout-sets-settings.png" width="520" alt="設定の「セット」タブ。ピッカーのキー、Mission Control の設定に関する警告、セットの一覧が並んでいる">
+  <img src="docs/images/layout-sets-settings.png" width="520" alt="設定の「セット」タブ。ピッカーのキーと、区画の図・名前・キーが並んだセットの一覧">
 </p>
 
 ピッカーでは ⏎ で適用、↑↓ で選択、→← で内訳の表示、⌘⏎ で編集、esc で閉じます。クリックでも適用できます。適用後は結果が HUD に出ます（「連絡: 3 件を配置」、「連絡: 3 件中 2 件を配置 ・ Microsoft Teams は起動していません」など）。
