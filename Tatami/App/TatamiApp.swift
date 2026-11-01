@@ -17,7 +17,9 @@ struct TatamiApp: App {
             MenuBarView(model: model)
         }
         Settings {
-            SettingsView(settings: model.settings)
+            SettingsView(model: model)
         }
+        // 内容の最小サイズより大きくはドラッグで広げられるようにする（既定では設定ウィンドウは固定サイズ）。
+        .windowResizability(.contentMinSize)
     }
 }

@@ -19,7 +19,16 @@ final class FakeWindowService: WindowService {
     /// ウィンドウの最小幅。目標がこれより小さければこの幅に丸められる。
     var minimumWidth: CGFloat = 0
 
+    /// raise で投げるエラー。nil なら成功。
+    var raiseError: WindowServiceError?
+    /// raise のたびに（raiseCalls に積んだあと）呼ぶフック。
+    var onRaise: ((WindowHandle) -> Void)?
+
     private(set) var setFrameCalls: [CGRect] = []
+    private(set) var unminimizeCalls: [WindowHandle] = []
+    private(set) var raiseCalls: [WindowHandle] = []
+    private(set) var unhideCalls: [WindowHandle] = []
+    private(set) var activateCalls: [WindowHandle] = []
     private var pendingReadError: WindowServiceError?
 
     func focusedWindow() throws -> WindowHandle {
@@ -45,5 +54,23 @@ final class FakeWindowService: WindowService {
             applied.size.width = minimumWidth
         }
         currentFrame = applied
+    }
+
+    func unminimize(_ window: WindowHandle) throws {
+        unminimizeCalls.append(window)
+    }
+
+    func raise(_ window: WindowHandle) throws {
+        if let raiseError { throw raiseError }
+        raiseCalls.append(window)
+        onRaise?(window)
+    }
+
+    func unhide(_ window: WindowHandle) throws {
+        unhideCalls.append(window)
+    }
+
+    func activate(_ window: WindowHandle) throws {
+        activateCalls.append(window)
     }
 }

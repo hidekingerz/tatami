@@ -14,9 +14,27 @@ struct MenuBarView: View {
             }
             Divider()
         }
+        Button("レイアウトセット…") {
+            model.openPicker()
+        }
+        .onAppear {
+            // ピッカーの ⌘⏎ から設定画面を開けるよう、シーン内でしか得られないアクションを預ける。
+            model.openSettingsAction = openSettings
+        }
+        if !model.layoutSets.sets.isEmpty {
+            ForEach(model.layoutSets.sets) { set in
+                Button(set.name) {
+                    model.apply(set)
+                }
+            }
+            Divider()
+        }
         Button("設定…") {
             NSApp.activate()
             openSettings()
+        }
+        if DebugMenu.isEnabled {
+            DebugMenu()
         }
         Divider()
         Button("tatami を終了") {

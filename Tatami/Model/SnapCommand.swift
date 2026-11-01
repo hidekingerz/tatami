@@ -99,36 +99,12 @@ enum SnapCommand: String, CaseIterable, Sendable {
         }
     }
 
-    /// 設定画面に表示するラベル。
+    /// 設定画面に表示するラベル。単発系は区画名（`SnapAction.title`）と同じ。
     var title: String {
         switch self {
         case .cycleLeft: "左半分 → 左 1/3 → 左 2/3"
         case .cycleRight: "右半分 → 右 1/3 → 右 2/3"
-        case .topHalf: "上半分"
-        case .bottomHalf: "下半分"
-        case .leftThird: "左 1/3"
-        case .centerThird: "中央 1/3"
-        case .rightThird: "右 1/3"
-        case .leftTwoThirds: "左 2/3"
-        case .rightTwoThirds: "右 2/3"
-        case .firstFourth: "左 1/4"
-        case .secondFourth: "左から 2 番目の 1/4"
-        case .thirdFourth: "左から 3 番目の 1/4"
-        case .lastFourth: "右 1/4"
-        case .topLeftQuarter: "左上"
-        case .topRightQuarter: "右上"
-        case .bottomLeftQuarter: "左下"
-        case .bottomRightQuarter: "右下"
-        case .topLeftSixth: "左上 1/6"
-        case .topCenterSixth: "中央上 1/6"
-        case .topRightSixth: "右上 1/6"
-        case .bottomLeftSixth: "左下 1/6"
-        case .bottomCenterSixth: "中央下 1/6"
-        case .bottomRightSixth: "右下 1/6"
-        case .maximize: "最大化"
-        case .maximizeHeight: "高さを最大化"
-        case .maximizeWidth: "幅を最大化"
-        case .center: "中央に配置"
+        default: sequence[0].title
         }
     }
 

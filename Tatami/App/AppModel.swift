@@ -1,6 +1,7 @@
 // Tatami/App/AppModel.swift
 import AppKit
 import Observation
+import SwiftUI
 
 /// アプリ全体で 1 つだけ持つ依存の束。
 ///
@@ -12,19 +13,63 @@ final class AppModel {
     @ObservationIgnored let permission = PermissionGate()
     @ObservationIgnored let engine: SnapEngine
     @ObservationIgnored let settings = CommandSettings()
+    /// メニューは store 自身を観測するので、ここでは観測対象にしない。
+    @ObservationIgnored let layoutSets = LayoutSetStore()
+    @ObservationIgnored let hud = ResultHUD()
+    @ObservationIgnored let runner: LayoutSetRunner
+    /// 設定画面の「いまの配置を保存」が使う。
+    @ObservationIgnored let capture: LayoutCapture
+    /// runner に渡したものと同じインスタンス。設定画面の警告が読む。
+    @ObservationIgnored let dockPreferences: any DockPreferencesReading
+    @ObservationIgnored let missionControl: any MissionControlShortcutReading
     @ObservationIgnored private var poller: TrustPoller?
+    /// ピッカー。初めて開くときに作る。
+    @ObservationIgnored private var picker: PickerPanel?
+    /// `MenuBarView` が表示されたときに預ける設定画面を開くアクション。
+    /// ピッカーは `App` のシーン外にあり `@Environment(\.openSettings)` を直接使えないため。
+    @ObservationIgnored var openSettingsAction: OpenSettingsAction?
 
     /// メニュー表示用の権限状態。通知やポーリングのたびに `refreshTrust()` で読み直す。
     /// スナップ時の判定は SnapEngine が毎回 OS に問い合わせるので、この値には依存しない。
     private(set) var isTrusted: Bool
 
+    /// 設定画面で選ばれているタブ。ピッカーの ⌘⏎ が「セット」タブと開くセットを指定する。
+    var settingsTab: SettingsTab = .commands(.halves)
+
     init() {
+        // 全プロパティの初期化前は self を捕捉できないので、クロージャにはローカル定数だけを渡す。
         let permission = self.permission
-        engine = SnapEngine(
-            windowService: AccessibilityWindowService(),
-            screens: NSScreenProvider(),
+        let hud = self.hud
+        let windowService = AccessibilityWindowService()
+        let screens = NSScreenProvider()
+        let enumerator = AccessibilityWindowEnumerator()
+        let dockPreferences = DockPreferences()
+        let missionControl = MissionControlShortcuts()
+        let engine = SnapEngine(
+            windowService: windowService,
+            screens: screens,
             permission: permission,
             onFailure: { _ in NSSound.beep() }
+        )
+        self.engine = engine
+        self.dockPreferences = dockPreferences
+        self.missionControl = missionControl
+        capture = LayoutCapture(enumerator: enumerator, screens: screens)
+        runner = LayoutSetRunner(
+            enumerator: enumerator,
+            windowService: windowService,
+            placer: WindowPlacer(windowService: windowService, screens: screens),
+            spaceMover: CGEventSpaceMover(
+                shortcuts: missionControl, enumerator: enumerator, windowService: windowService
+            ),
+            dockPreferences: dockPreferences,
+            permission: permission,
+            onStarted: { set in hud.showPersistent("\(set.name) を適用中…") },
+            onFinished: { result in
+                // セットが窓を動かしたので、直前のスナップの記憶はもう当てにならない。
+                engine.clearMemory()
+                hud.show(result.summary)
+            }
         )
         isTrusted = permission.isTrusted
 
@@ -42,8 +87,61 @@ final class AppModel {
     func start() {
         guard ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil else { return }
         permission.requestAccess()
-        ShortcutRegistrar.register(engine: engine, settings: settings)
+        ShortcutRegistrar.register(engine: engine, settings: settings, isBusy: { [runner] in runner.isRunning })
+        ShortcutRegistrar.registerLayoutSets(
+            store: layoutSets,
+            isBusy: { [runner] in runner.isRunning },
+            onPicker: { [weak self] in self?.openPicker() },
+            onApply: { [weak self] in self?.apply($0) }
+        )
         watchTrustUntilGranted()
+    }
+
+    /// レイアウトセットを適用する。実行中や権限なしで適用できなかったら beep する。
+    /// ピッカーが開いていると tatami が前面に残り、合成マウス操作を邪魔するので先に閉じる。
+    func apply(_ set: LayoutSet) {
+        closePicker()
+        let runner = self.runner
+        Task {
+            if await !runner.apply(set) {
+                NSSound.beep()
+            }
+        }
+    }
+
+    /// レイアウトセットのピッカーを開く。出ていれば閉じる。
+    func openPicker() {
+        let picker = self.picker ?? PickerPanel(
+            store: layoutSets,
+            onApply: { [weak self] set in self?.apply(set) },
+            onEdit: { [weak self] set in self?.openSettings(for: set) }
+        )
+        self.picker = picker
+        picker.toggle()
+    }
+
+    /// レイアウトセットのピッカーを閉じる。開いていなければ何もしない。
+    func closePicker() {
+        picker?.close()
+    }
+
+    /// 設定画面の「セット」タブを開き、set があればそれを展開する。
+    /// メニューを一度も開いていないと `openSettingsAction` が nil なので、そのときは
+    /// 非公開セレクタ `showSettingsWindow:` を送る。
+    private func openSettings(for set: LayoutSet?) {
+        settingsTab = .layoutSets(selectedID: set?.id)
+        NSApp.activate()
+        if let openSettingsAction {
+            openSettingsAction()
+        } else {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+        // 経路 B が効かなかったときに、窓のないまま tatami がアクティブに残り、
+        // 押したキーがすべて beep し続けないように、少し待って窓がなければアクティブをやめる。
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            if NSApp.keyWindow == nil && NSApp.isActive { NSApp.deactivate() }
+        }
     }
 
     /// 許可されるまで 1 秒おきに権限を読み直す。許可を検知したらメニュー表示を更新して止まる。
