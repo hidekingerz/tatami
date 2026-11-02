@@ -2,7 +2,7 @@ import ApplicationServices
 import CoreGraphics
 
 /// ウィンドウ操作で起こりうる失敗。
-enum WindowServiceError: Error, Sendable {
+enum WindowServiceError: Error, Sendable, Equatable {
     /// 最前面アプリが取れない。
     case noFrontmostApplication
     /// 最前面アプリにフォーカスウィンドウがない（デスクトップなど）。

@@ -156,4 +156,61 @@ struct SnapEngineTests {
         // NS: (0, 45, 800, 1010) → AX: y = 1080 - (45 + 1010) = 25
         #expect(windows.setFrameCalls == [CGRect(x: 0, y: 25, width: 800, height: 1010)])
     }
+
+    @Test func 記憶した窓に区画を適用して記憶を消しmemoryを更新する() {
+        let engine = makeEngine()
+        engine.rememberFocusedWindow()
+        #expect(engine.rememberedWindow == windows.window)
+        #expect(engine.applyToRememberedWindow(.rightThird) == nil)
+        #expect(windows.setFrameCalls == [CGRect(x: 1280, y: 25, width: 640, height: 1010)])
+        #expect(engine.memory?.action == .rightThird)
+        #expect(engine.memory?.window == windows.window)
+        #expect(engine.rememberedWindow == nil)
+    }
+
+    @Test func 取れなければ記憶はnilに戻る() {
+        let engine = makeEngine()
+        engine.rememberFocusedWindow()
+        windows.focusedWindowError = .noFocusedWindow
+        engine.rememberFocusedWindow()
+        #expect(engine.rememberedWindow == nil)
+    }
+
+    @Test func forgetで消える() {
+        let engine = makeEngine()
+        engine.rememberFocusedWindow()
+        engine.forgetRememberedWindow()
+        #expect(engine.rememberedWindow == nil)
+    }
+
+    @Test func 記憶なしはnoTargetWindowでmemoryは不変() {
+        var failures: [SnapFailure] = []
+        let engine = makeEngine { failures.append($0) }
+        engine.perform(.maximize)
+        let before = engine.memory
+        #expect(engine.applyToRememberedWindow(.leftThird) == .noTargetWindow)
+        #expect(engine.memory == before)
+        #expect(failures.count == 1)
+    }
+
+    @Test func 権限なしはnotTrustedで権限要求する() {
+        permission.isTrusted = false
+        let engine = makeEngine()
+        engine.rememberFocusedWindow()
+        #expect(engine.applyToRememberedWindow(.leftThird) == .notTrusted)
+        #expect(permission.requestAccessCount == 1)
+        #expect(windows.setFrameCalls.isEmpty)
+    }
+
+    @Test func 適用エラーはwindowでmemoryは不変() {
+        let engine = makeEngine()
+        engine.perform(.maximize)
+        let before = engine.memory
+        engine.rememberFocusedWindow()
+        windows.setFrameError = .axError(.invalidUIElement)
+        let failure = engine.applyToRememberedWindow(.leftThird)
+        guard case .window = failure else { Issue.record("expected .window, got \(String(describing: failure))"); return }
+        #expect(engine.memory == before)
+        #expect(engine.rememberedWindow == nil)
+    }
 }
