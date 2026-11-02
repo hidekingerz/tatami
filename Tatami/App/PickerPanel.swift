@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// レイアウトセットのピッカーを出すパネル。
+/// レイアウトセットと区画のピッカーを出すパネル。開いている間は入力ソースを ASCII にし、閉じたら戻す。
 ///
 /// 検索欄に文字を入れるため、非アクティブ化パネルではなく通常の key window にする（tatami を前面にする）。
 /// 閉じるときは開く前に前面だったアプリへ戻す。メニューバーアプリは窓を閉じてもアクティブなままで、
@@ -13,22 +13,39 @@ final class PickerPanel: NSPanel {
     private static let topRatio: CGFloat = 1.0 / 5
 
     private let store: LayoutSetStore
+    private let inputSource: any InputSourceSwitching
     private let state = PickerState()
     private let onApply: @MainActor (LayoutSet) -> Void
+    private let onApplyRegion: @MainActor (SnapAction) -> Void
     private let onEdit: @MainActor (LayoutSet?) -> Void
+    private let onEditRegion: @MainActor (SnapCommand.Category) -> Void
+    /// 閉じるたびに（どの経路でも）1 回呼ぶ。
+    private let onDismiss: @MainActor () -> Void
     /// 開く前に前面だったアプリ。閉じるときにアクティブへ戻す。
     private var previousApp: NSRunningApplication?
     /// 表示中のパネル上端の y（NS 座標）。内容に応じて高さが変わっても上端を動かさない。
     private var anchorTop: CGFloat?
+    /// 閉じている途中。orderOut から resignKey 経由で再入しても restore / onDismiss を二重に呼ばない。
+    private var isDismissing = false
 
     init(
         store: LayoutSetStore,
+        favorites: FavoriteRegions,
+        settings: CommandSettings,
+        inputSource: any InputSourceSwitching,
         onApply: @escaping @MainActor (LayoutSet) -> Void,
-        onEdit: @escaping @MainActor (LayoutSet?) -> Void
+        onApplyRegion: @escaping @MainActor (SnapAction) -> Void,
+        onEdit: @escaping @MainActor (LayoutSet?) -> Void,
+        onEditRegion: @escaping @MainActor (SnapCommand.Category) -> Void,
+        onDismiss: @escaping @MainActor () -> Void
     ) {
         self.store = store
+        self.inputSource = inputSource
         self.onApply = onApply
+        self.onApplyRegion = onApplyRegion
         self.onEdit = onEdit
+        self.onEditRegion = onEditRegion
+        self.onDismiss = onDismiss
         super.init(
             contentRect: CGRect(x: 0, y: 0, width: PickerView.width, height: 120),
             styleMask: [.borderless],
@@ -48,9 +65,13 @@ final class PickerPanel: NSPanel {
         contentView = NSHostingView(
             rootView: PickerView(
                 store: store,
+                favorites: favorites,
+                settings: settings,
                 state: state,
                 onApply: { [weak self] set in self?.apply(set) },
+                onApplyRegion: { [weak self] action in self?.applyRegion(action) },
                 onEdit: { [weak self] set in self?.edit(set) },
+                onEditRegion: { [weak self] category in self?.editRegion(category) },
                 onClose: { [weak self] in self?.close() }
             )
         )
@@ -99,6 +120,7 @@ final class PickerPanel: NSPanel {
     private func show() {
         let frontmost = NSWorkspace.shared.frontmostApplication
         previousApp = frontmost == NSRunningApplication.current ? nil : frontmost
+        inputSource.enterASCII()
         state.reset()
 
         let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
@@ -116,12 +138,16 @@ final class PickerPanel: NSPanel {
     }
 
     private func dismiss(restoringPreviousApp: Bool) {
-        guard isVisible else { return }
+        guard isVisible, !isDismissing else { return }
+        isDismissing = true
+        defer { isDismissing = false }
         // orderOut の途中で resignKey から close が再入しても二重に戻さないよう、先に手放す。
         let previous = previousApp
         previousApp = nil
         anchorTop = nil
         orderOut(nil)
+        inputSource.restore()
+        onDismiss()
         if restoringPreviousApp {
             previous?.activate()
         }
@@ -133,9 +159,20 @@ final class PickerPanel: NSPanel {
         onApply(set)
     }
 
+    /// 区画は閉じずに渡す。覚えておいたウィンドウに適用してから閉じるのは受け取り側の役目。
+    private func applyRegion(_ action: SnapAction) {
+        onApplyRegion(action)
+    }
+
     /// 設定画面を開くので、元のアプリには戻さずに閉じる。
     private func edit(_ set: LayoutSet?) {
         dismiss(restoringPreviousApp: false)
         onEdit(set)
+    }
+
+    /// 区画のカテゴリのタブを設定画面で開くので、元のアプリには戻さずに閉じる。
+    private func editRegion(_ category: SnapCommand.Category) {
+        dismiss(restoringPreviousApp: false)
+        onEditRegion(category)
     }
 }
