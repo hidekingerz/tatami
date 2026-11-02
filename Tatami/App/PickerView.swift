@@ -18,13 +18,28 @@ final class PickerState {
     /// 増えるたびに検索欄へフォーカスを移す合図。パネルは使い回すので onAppear だけでは足りない。
     private(set) var focusRequest = 0
 
-    /// query で絞ったセット。名前とアプリ名への部分一致、大文字小文字を無視。
-    static func filter(_ sets: [LayoutSet], query: String) -> [LayoutSet] {
-        guard !query.isEmpty else { return sets }
-        return sets.filter { set in
-            set.name.localizedCaseInsensitiveContains(query)
-                || set.rows.contains { $0.appName.localizedCaseInsensitiveContains(query) }
+    /// query で絞った見出し付きの一覧。セット、区画の順。区画はお気に入りを先頭に、カテゴリ順を保つ。
+    /// 一致が 0 件の見出しは含めない。
+    static func sections(sets: [LayoutSet], favorites: Set<SnapAction>, query: String) -> [PickerSection] {
+        let tokens = PickerQuery.tokens(query)
+        let matchedSets = sets.filter { PickerQuery.matches(tokens: tokens, terms: PickerQuery.terms(of: $0)) }
+        let all = SnapAction.allInCategoryOrder
+        let ordered = all.filter(favorites.contains) + all.filter { !favorites.contains($0) }
+        let matchedRegions = ordered.filter { PickerQuery.matches(tokens: tokens, terms: $0.searchTerms) }
+
+        var result: [PickerSection] = []
+        if !matchedSets.isEmpty {
+            result.append(PickerSection(title: "セット", items: matchedSets.map(PickerItem.set)))
         }
+        if !matchedRegions.isEmpty {
+            result.append(PickerSection(title: "区画", items: matchedRegions.map(PickerItem.region)))
+        }
+        return result
+    }
+
+    /// 見出しを外して一列にした行。選択位置はこの並びで数える。
+    static func flatten(_ sections: [PickerSection]) -> [PickerItem] {
+        sections.flatMap(\.items)
     }
 
     /// 開くたびに、検索と選択と内訳を初期状態に戻し、検索欄へフォーカスを移す。
@@ -70,7 +85,7 @@ struct PickerView: View {
     }
 
     private var filtered: [LayoutSet] {
-        PickerState.filter(store.sets, query: state.query)
+        PickerState.flatten(PickerState.sections(sets: store.sets, favorites: [], query: state.query)).compactMap(\.setValue)
     }
 
     /// 選択中のセット。一覧が空なら nil。選択位置が一覧の外なら端に寄せる。
