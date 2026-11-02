@@ -532,13 +532,6 @@ private struct CaptureSheet: View {
     }
 }
 
-private extension SnapCommand.Category {
-    /// このカテゴリの区画。各コマンドの先頭の区画で、ループ系は半分の区画になる。27 区画がちょうど 1 回ずつ現れる。
-    var actions: [SnapAction] {
-        commands.map { $0.sequence[0] }
-    }
-}
-
 /// 区画メニューの項目に付ける画像。NSMenu は SwiftUI のビューを描けないので NSImage にする。
 @MainActor
 private enum RegionMenuImages {
