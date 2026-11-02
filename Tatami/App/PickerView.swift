@@ -51,7 +51,7 @@ final class PickerState {
     }
 }
 
-/// レイアウトセットを選んで適用するピッカーの中身。上に検索欄、中にセットの行、下にキーのヒント。
+/// レイアウトセットと区画を選んで適用するピッカーの中身。上に検索欄、中に見出し付きの行、下にキーのヒント。
 ///
 /// キー操作は検索欄がフォーカスを持っていても効くよう、ルートの `.onKeyPress` で受ける
 /// （`NSPanel.keyDown` はフィールドエディタが先に消費するので届かない）。
@@ -61,9 +61,13 @@ struct PickerView: View {
     private static let maxListHeight: CGFloat = 400
 
     let store: LayoutSetStore
+    let favorites: FavoriteRegions
+    let settings: CommandSettings
     let state: PickerState
     let onApply: (LayoutSet) -> Void
+    let onApplyRegion: (SnapAction) -> Void
     let onEdit: (LayoutSet?) -> Void
+    let onEditRegion: (SnapCommand.Category) -> Void
     let onClose: () -> Void
 
     @FocusState private var isSearchFocused: Bool
@@ -72,27 +76,39 @@ struct PickerView: View {
 
     init(
         store: LayoutSetStore,
+        favorites: FavoriteRegions,
+        settings: CommandSettings,
         state: PickerState,
         onApply: @escaping (LayoutSet) -> Void,
+        onApplyRegion: @escaping (SnapAction) -> Void,
         onEdit: @escaping (LayoutSet?) -> Void,
+        onEditRegion: @escaping (SnapCommand.Category) -> Void,
         onClose: @escaping () -> Void = {}
     ) {
         self.store = store
+        self.favorites = favorites
+        self.settings = settings
         self.state = state
         self.onApply = onApply
+        self.onApplyRegion = onApplyRegion
         self.onEdit = onEdit
+        self.onEditRegion = onEditRegion
         self.onClose = onClose
     }
 
-    private var filtered: [LayoutSet] {
-        PickerState.flatten(PickerState.sections(sets: store.sets, favorites: [], query: state.query)).compactMap(\.setValue)
+    private var sections: [PickerSection] {
+        PickerState.sections(sets: store.sets, favorites: favorites.regions, query: state.query)
     }
 
-    /// 選択中のセット。一覧が空なら nil。選択位置が一覧の外なら端に寄せる。
-    private var selected: LayoutSet? {
-        let sets = filtered
-        guard !sets.isEmpty else { return nil }
-        return sets[min(max(state.selectedIndex, 0), sets.count - 1)]
+    private var items: [PickerItem] {
+        PickerState.flatten(sections)
+    }
+
+    /// 選択中の行。一覧が空なら nil。選択位置が一覧の外なら端に寄せる。
+    private var selected: PickerItem? {
+        let items = items
+        guard !items.isEmpty else { return nil }
+        return items[min(max(state.selectedIndex, 0), items.count - 1)]
     }
 
     var body: some View {
@@ -115,8 +131,8 @@ struct PickerView: View {
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            guard let selected else { return .ignored }
-            state.expandedID = selected.id
+            guard let set = selected?.setValue else { return .ignored }
+            state.expandedID = set.id
             return .handled
         }
         .onKeyPress(.leftArrow) {
@@ -126,6 +142,11 @@ struct PickerView: View {
         }
         .onKeyPress(.return, phases: .down) { press in
             submit(edit: press.modifiers.contains(.command))
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "dD"), phases: .down) { press in
+            guard press.modifiers.contains(.command), let region = selected?.region else { return .ignored }
+            favorites.toggle(region)
             return .handled
         }
         .onKeyPress(.escape) {
@@ -140,11 +161,11 @@ struct PickerView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("レイアウトセットを検索…", text: Binding(get: { state.query }, set: { state.query = $0 }))
+            TextField("セットや区画を検索…", text: Binding(get: { state.query }, set: { state.query = $0 }))
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .focused($isSearchFocused)
-            Text("\(filtered.count) セット")
+            Text("\(items.count) 件")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
@@ -154,10 +175,8 @@ struct PickerView: View {
 
     @ViewBuilder
     private var content: some View {
-        if store.sets.isEmpty {
-            message("設定でセットを作ってください")
-        } else if filtered.isEmpty {
-            message("一致するセットはありません")
+        if items.isEmpty {
+            message("一致する項目はありません")
         } else {
             list
         }
@@ -172,20 +191,21 @@ struct PickerView: View {
     }
 
     private var list: some View {
-        let sets = filtered
+        let sections = sections
         let selectedID = selected?.id
         return ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 2) {
-                    ForEach(sets) { set in
-                        PickerRow(
-                            set: set,
-                            isSelected: set.id == selectedID,
-                            isExpanded: set.id == state.expandedID
-                        )
-                        .id(set.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onApply(set) }
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(sections, id: \.title) { section in
+                        Text(section.title)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 6)
+                            .padding(.horizontal, 10)
+                        ForEach(section.items) { item in
+                            row(for: item, isSelected: item.id == selectedID)
+                                .id(item.id)
+                        }
                     }
                 }
                 .padding(6)
@@ -199,8 +219,34 @@ struct PickerView: View {
         }
     }
 
+    @ViewBuilder
+    private func row(for item: PickerItem, isSelected: Bool) -> some View {
+        switch item {
+        case .set(let set):
+            PickerRow(set: set, isSelected: isSelected, isExpanded: set.id == state.expandedID)
+                .contentShape(Rectangle())
+                .onTapGesture { onApply(set) }
+        case .region(let action):
+            RegionRow(
+                action: action,
+                isSelected: isSelected,
+                isFavorite: favorites.contains(action),
+                keyLabel: keyLabel(for: action),
+                onToggleFavorite: { favorites.toggle(action) }
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { onApplyRegion(action) }
+        }
+    }
+
+    /// 区画に単独で対応するコマンドがあり、有効で、キーが割り当てられているときだけ、そのキーの表記。
+    private func keyLabel(for action: SnapAction) -> String? {
+        guard let command = action.singleCommand, settings.isEnabled(command) else { return nil }
+        return KeyboardShortcuts.getShortcut(for: command.shortcutName)?.description
+    }
+
     private var hints: some View {
-        Text("⏎ 適用  ↑↓ 選択  →← 内訳  ⌘⏎ 編集  esc 閉じる")
+        Text("⏎ 適用  ↑↓ 選択  →← 内訳  ⌘D ★  ⌘⏎ 編集  esc 閉じる")
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -208,25 +254,84 @@ struct PickerView: View {
             .padding(.vertical, 8)
     }
 
-    /// 選択を動かす。端で止まり、循環しない。
+    /// 選択を動かす。見出しをまたいで一列に数え、端で止まり、循環しない。
     private func moveSelection(by delta: Int) {
-        let count = filtered.count
+        let count = items.count
         guard count > 0 else { return }
         state.selectedIndex = min(max(state.selectedIndex + delta, 0), count - 1)
     }
 
-    /// ⏎ は選択中のセットを適用し、⌘⏎ は設定で編集する。セットが 1 件もなければどちらも設定を開く。
+    /// ⏎ は選択中の行を適用し、⌘⏎ は設定で編集する。区画の編集はその区画のコマンドのカテゴリのタブを開く。
     private func submit(edit: Bool) {
-        if store.sets.isEmpty {
-            onEdit(nil)
-            return
-        }
         guard let selected else { return }
-        if edit {
-            onEdit(selected)
-        } else {
-            onApply(selected)
+        switch selected {
+        case .set(let set):
+            if edit {
+                onEdit(set)
+            } else {
+                onApply(set)
+            }
+        case .region(let action):
+            if edit {
+                onEditRegion(action.singleCommand?.category ?? .halves)
+            } else {
+                onApplyRegion(action)
+            }
         }
+    }
+}
+
+/// ピッカーの区画の 1 行。グリフ、区画名、割当キー、★。セットの行より低い 1 行。
+private struct RegionRow: View {
+    let action: SnapAction
+    let isSelected: Bool
+    let isFavorite: Bool
+    let keyLabel: String?
+    let onToggleFavorite: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RegionGlyph(action: action)
+                .size(width: 36, height: 22)
+                .highlighted(isSelected)
+            Text(action.title)
+                .font(.system(size: 14))
+                .foregroundStyle(primaryStyle)
+            Spacer(minLength: 8)
+            if let keyLabel {
+                Text(keyLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(secondaryStyle)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isSelected ? Color.white.opacity(0.2) : Color.primary.opacity(0.08))
+                    )
+            }
+            Button {
+                onToggleFavorite()
+            } label: {
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                    .foregroundStyle(secondaryStyle)
+            }
+            .buttonStyle(.borderless)
+            .help("★ を付ける／外す")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.accentColor : Color.clear)
+        )
+    }
+
+    private var primaryStyle: Color {
+        isSelected ? .white : .primary
+    }
+
+    private var secondaryStyle: Color {
+        isSelected ? .white.opacity(0.85) : .secondary
     }
 }
 

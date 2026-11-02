@@ -25,6 +25,8 @@ final class AppModel {
     @ObservationIgnored private var poller: TrustPoller?
     /// ピッカー。初めて開くときに作る。
     @ObservationIgnored private var picker: PickerPanel?
+    @ObservationIgnored let favorites = FavoriteRegions()
+    @ObservationIgnored private let inputSource: any InputSourceSwitching = CarbonInputSourceSwitcher()
     /// `MenuBarView` が表示されたときに預ける設定画面を開くアクション。
     /// ピッカーは `App` のシーン外にあり `@Environment(\.openSettings)` を直接使えないため。
     @ObservationIgnored var openSettingsAction: OpenSettingsAction?
@@ -113,8 +115,14 @@ final class AppModel {
     func openPicker() {
         let picker = self.picker ?? PickerPanel(
             store: layoutSets,
+            favorites: favorites,
+            settings: settings,
+            inputSource: inputSource,
             onApply: { [weak self] set in self?.apply(set) },
-            onEdit: { [weak self] set in self?.openSettings(for: set) }
+            onApplyRegion: { _ in },
+            onEdit: { [weak self] set in self?.openSettings(for: set) },
+            onEditRegion: { _ in },
+            onDismiss: {}
         )
         self.picker = picker
         picker.toggle()
