@@ -27,7 +27,7 @@ struct SettingsView: View {
             set: { model.settingsTab = $0 }
         )) {
             ForEach(SnapCommand.Category.allCases, id: \.self) { category in
-                CommandListTab(category: category, settings: model.settings)
+                CommandListTab(category: category, settings: model.settings, favorites: model.favorites)
                     .tabItem {
                         Label {
                             Text(category.title)
@@ -106,12 +106,13 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 struct CommandListTab: View {
     let category: SnapCommand.Category
     let settings: CommandSettings
+    let favorites: FavoriteRegions
 
     var body: some View {
         Form {
             Section {
                 ForEach(category.commands, id: \.self) { command in
-                    CommandRow(command: command, settings: settings)
+                    CommandRow(command: command, settings: settings, favorites: favorites)
                 }
             } header: {
                 HStack {
@@ -130,13 +131,14 @@ struct CommandListTab: View {
     }
 }
 
-/// 1 コマンド分の行: トグル / 区画グリフ / 名前 / キーのレコーダー。
+/// 1 コマンド分の行: トグル / ★ / 区画グリフ / 名前 / キーのレコーダー。
 ///
 /// 無効のときは Recorder を操作不可にする。KeyboardShortcuts はキーを記録した時点でホットキーを登録するので、
 /// 無効中に記録できると「無効なのに効く」状態になる。
 struct CommandRow: View {
     let command: SnapCommand
     let settings: CommandSettings
+    let favorites: FavoriteRegions
 
     var body: some View {
         let isOn = settings.isEnabled(command)
@@ -148,6 +150,19 @@ struct CommandRow: View {
             .toggleStyle(.switch)
             .labelsHidden()
             .controlSize(.small)
+
+            // 巡回コマンドはピッカーの区画ではないので ★ を出さず、同じ幅を空けて列を揃える。
+            if command.isCycle {
+                Color.clear.frame(width: 16)
+            } else {
+                Button {
+                    favorites.toggle(command.sequence[0])
+                } label: {
+                    Image(systemName: favorites.contains(command.sequence[0]) ? "star.fill" : "star")
+                }
+                .buttonStyle(.borderless)
+                .help("ピッカーの先頭に出す")
+            }
 
             RegionGlyph(action: command.sequence[0], isEnabled: isOn)
 

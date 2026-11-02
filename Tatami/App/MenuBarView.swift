@@ -14,7 +14,7 @@ struct MenuBarView: View {
             }
             Divider()
         }
-        Button("レイアウトセット…") {
+        Button("ピッカー…") {
             model.openPicker()
         }
         .onAppear {

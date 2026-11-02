@@ -119,13 +119,42 @@ final class AppModel {
             settings: settings,
             inputSource: inputSource,
             onApply: { [weak self] set in self?.apply(set) },
-            onApplyRegion: { _ in },
+            onApplyRegion: { [weak self] action in self?.apply(action) },
             onEdit: { [weak self] set in self?.openSettings(for: set) },
-            onEditRegion: { _ in },
-            onDismiss: {}
+            onEditRegion: { [weak self] category in self?.openSettings(for: category) },
+            // 記憶を消すだけにする。パネルの再入ガードは、ここで何も開いたりアクティブにしたりしない前提。
+            onDismiss: { [weak self] in self?.engine.forgetRememberedWindow() }
         )
         self.picker = picker
+        // これから開くときだけ、動かす対象を記憶する（PickerPanel.show() が tatami をアクティブにする前に）。
+        // tatami 自身が前面なら、前面アプリの窓は tatami の窓なので記憶しない。
+        if !picker.isVisible {
+            if NSWorkspace.shared.frontmostApplication == NSRunningApplication.current {
+                engine.forgetRememberedWindow()
+            } else {
+                engine.rememberFocusedWindow()
+            }
+        }
         picker.toggle()
+    }
+
+    /// ピッカーで選んだ区画を、ピッカーを開く前に前面にあった窓へ当てる。
+    /// 記憶は `closePicker()`（dismiss → onDismiss）で消えるので、閉じる前に適用する。
+    /// 失敗時の beep は engine の `onFailure` が鳴らすので、ここでは HUD だけ出す。
+    func apply(_ action: SnapAction) {
+        guard !runner.isRunning else {
+            closePicker()
+            NSSound.beep()
+            return
+        }
+        let failure = engine.applyToRememberedWindow(action)
+        closePicker()
+        switch failure {
+        case nil: break
+        case .noTargetWindow: hud.show("対象のウィンドウがありません")
+        case .notTrusted: break
+        default: hud.show("ウィンドウを動かせませんでした")
+        }
     }
 
     /// レイアウトセットのピッカーを閉じる。開いていなければ何もしない。
@@ -134,10 +163,21 @@ final class AppModel {
     }
 
     /// 設定画面の「セット」タブを開き、set があればそれを展開する。
-    /// メニューを一度も開いていないと `openSettingsAction` が nil なので、そのときは
-    /// 非公開セレクタ `showSettingsWindow:` を送る。
     private func openSettings(for set: LayoutSet?) {
         settingsTab = .layoutSets(selectedID: set?.id)
+        presentSettings()
+    }
+
+    /// 設定画面のカテゴリのタブを開く。ピッカーの区画の ⌘⏎ から使う。
+    private func openSettings(for category: SnapCommand.Category) {
+        settingsTab = .commands(category)
+        presentSettings()
+    }
+
+    /// 設定画面を前面に出す。
+    /// メニューを一度も開いていないと `openSettingsAction` が nil なので、そのときは
+    /// 非公開セレクタ `showSettingsWindow:` を送る。
+    private func presentSettings() {
         NSApp.activate()
         if let openSettingsAction {
             openSettingsAction()

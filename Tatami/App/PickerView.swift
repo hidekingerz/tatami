@@ -147,6 +147,10 @@ struct PickerView: View {
         .onKeyPress(characters: CharacterSet(charactersIn: "dD"), phases: .down) { press in
             guard press.modifiers.contains(.command), let region = selected?.region else { return .ignored }
             favorites.toggle(region)
+            // 並びが変わるので、選択を同じ区画の新しい位置に移す。
+            if let index = items.firstIndex(of: .region(region)) {
+                state.selectedIndex = index
+            }
             return .handled
         }
         .onKeyPress(.escape) {
@@ -313,7 +317,7 @@ private struct RegionRow: View {
                 onToggleFavorite()
             } label: {
                 Image(systemName: isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(secondaryStyle)
+                    .foregroundStyle(starStyle)
             }
             .buttonStyle(.borderless)
             .help("★ を付ける／外す")
@@ -332,6 +336,12 @@ private struct RegionRow: View {
 
     private var secondaryStyle: Color {
         isSelected ? .white.opacity(0.85) : .secondary
+    }
+
+    /// 付いている ★ はアクセント色で目立たせる。選択中は背景がアクセント色なので白にする。
+    private var starStyle: Color {
+        guard isFavorite else { return secondaryStyle }
+        return isSelected ? .white : .accentColor
     }
 }
 
