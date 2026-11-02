@@ -2,11 +2,24 @@ import CoreGraphics
 import os
 
 /// スナップが成立しなかった理由。UI 側は beep とログに使う。
-enum SnapFailure: Sendable {
+enum SnapFailure: Sendable, Equatable {
     case notTrusted
     case noScreen
     case window(WindowServiceError)
+    case noTargetWindow
     case unknown(any Error)
+
+    /// `unknown` は比べようがないので常に false。
+    static func == (lhs: SnapFailure, rhs: SnapFailure) -> Bool {
+        switch (lhs, rhs) {
+        case (.notTrusted, .notTrusted), (.noScreen, .noScreen), (.noTargetWindow, .noTargetWindow):
+            true
+        case let (.window(a), .window(b)):
+            a == b
+        default:
+            false
+        }
+    }
 }
 
 /// ショートカット 1 回分のスナップを実行する司令塔。
@@ -24,6 +37,9 @@ final class SnapEngine {
 
     /// 直前のスナップの記憶。ループ判定に使う。
     private(set) var memory: CycleMemory?
+
+    /// ピッカーを開く前の最前面ウィンドウ。区画適用の対象になる。
+    private(set) var rememberedWindow: WindowHandle?
 
     init(
         windowService: any WindowService,
@@ -69,6 +85,51 @@ final class SnapEngine {
     /// 直前のスナップの記憶を捨てる。レイアウトセット適用後など、ループ判定を初期化したいときに使う。
     func clearMemory() {
         memory = nil
+    }
+
+    /// 現在のフォーカスウィンドウを対象として記憶する。取れなければ nil。
+    func rememberFocusedWindow() {
+        do {
+            rememberedWindow = try windowService.focusedWindow()
+        } catch {
+            rememberedWindow = nil
+            logger.error("remember failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    func forgetRememberedWindow() {
+        rememberedWindow = nil
+    }
+
+    /// 記憶したウィンドウに区画を適用する。成功は nil。結果にかかわらず記憶は消える。
+    @discardableResult
+    func applyToRememberedWindow(_ action: SnapAction) -> SnapFailure? {
+        guard permission.isTrusted else {
+            permission.requestAccess()
+            fail(.notTrusted)
+            rememberedWindow = nil
+            return .notTrusted
+        }
+        guard let window = rememberedWindow else {
+            fail(.noTargetWindow)
+            return .noTargetWindow
+        }
+        defer { rememberedWindow = nil }
+
+        do {
+            let applied = try placer.place(window, action: action)
+            memory = CycleMemory(window: window, action: action, appliedFrame: applied)
+            return nil
+        } catch PlacementError.noScreen {
+            fail(.noScreen)
+            return .noScreen
+        } catch let error as WindowServiceError {
+            fail(.window(error))
+            return .window(error)
+        } catch {
+            fail(.unknown(error))
+            return .unknown(error)
+        }
     }
 
     private func fail(_ failure: SnapFailure) {
