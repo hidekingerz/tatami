@@ -136,4 +136,21 @@ extension SnapCommand.Category {
     var commands: [SnapCommand] {
         SnapCommand.allCases.filter { $0.category == self }
     }
+
+    /// このカテゴリの区画。各コマンドの先頭の区画で、ループ系は半分の区画になる。27 区画がちょうど 1 回ずつ現れる。
+    var actions: [SnapAction] {
+        commands.map { $0.sequence[0] }
+    }
+}
+
+extension SnapAction {
+    /// カテゴリ順（タブの順、カテゴリ内はコマンドの順）に並べた 27 区画。
+    static var allInCategoryOrder: [SnapAction] {
+        SnapCommand.Category.allCases.flatMap(\.actions)
+    }
+
+    /// この区画だけを巡るコマンド。ループ系の途中の区画では nil。
+    var singleCommand: SnapCommand? {
+        SnapCommand.allCases.first { $0.sequence == [self] }
+    }
 }

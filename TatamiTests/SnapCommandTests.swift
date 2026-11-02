@@ -92,4 +92,22 @@ struct SnapCommandTests {
         #expect(titles.allSatisfy { !$0.isEmpty })
         #expect(Set(titles).count == titles.count)
     }
+
+    @Test func カテゴリ順の区画は27個が1回ずつ() {
+        let all = SnapAction.allInCategoryOrder
+        #expect(all.count == 27)
+        #expect(Set(all).count == 27)
+        #expect(all.prefix(5) == [.leftHalf, .rightHalf, .topHalf, .bottomHalf, .leftThird])
+        #expect(all.suffix(4) == [.maximize, .maximizeHeight, .maximizeWidth, .center])
+    }
+
+    @Test func 単発コマンドは自分だけを持つコマンド() {
+        #expect(SnapAction.leftHalf.singleCommand == nil)
+        #expect(SnapAction.rightHalf.singleCommand == nil)
+        #expect(SnapAction.leftThird.singleCommand == .leftThird)
+        #expect(SnapAction.center.singleCommand == .center)
+        for action in SnapAction.allCases where action != .leftHalf && action != .rightHalf {
+            #expect(action.singleCommand?.sequence == [action])
+        }
+    }
 }
