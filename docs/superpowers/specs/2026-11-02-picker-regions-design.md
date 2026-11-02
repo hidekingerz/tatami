@@ -316,6 +316,8 @@ final class CarbonInputSourceSwitcher: InputSourceSwitching   // TIS* を使う�
   }
   ```
   beep は既存の `onFailure: { _ in NSSound.beep() }` が鳴らすので二重に鳴らさない。
+- `PickerPanel.dismiss` には再入ガード（`isDismissing`）がある。`orderOut` が `resignKey` を誘発して `dismiss` が再入しても、
+  `restore()` と `onDismiss()` は 1 回しか走らない。そのため `onDismiss` は状態を消すだけにする（ほかの処理を載せない）。
 - `AppModel.openSettings(for category: SnapCommand.Category)`: `settingsTab = .commands(category)` にして既存の開く経路を使う。
 - `AppModel` に `@ObservationIgnored let favorites = FavoriteRegions()` と `inputSource = CarbonInputSourceSwitcher()`。
 
@@ -326,6 +328,7 @@ final class CarbonInputSourceSwitcher: InputSourceSwitching   // TIS* を使う�
 - 構成は従来どおり（検索欄 / 一覧 / ヒント）。一覧はセクション見出し付き。見出しは 11pt、secondary、左寄せ、上に 6pt の余白。
 - 区画の行（1 段、高さはセットの行より低い）: `RegionGlyph(action:)` 36×22 → 区画名 14pt → `Spacer` → キー（あれば、セットの行と同じ角丸の札）→ ★ ボタン（`star.fill` / `star`、borderless、`.help("★ を付ける／外す")`）。
   ★ のクリックは `onToggleFavorite(action)` を呼び、行のタップには伝えない。
+  ⌘D のあとも選択はトグルした区画に付いたまま動かない（並びが変わっても追従する）。塗りつぶしの ★ は、選択されていない行ではアクセント色にする。
 - セットの行は従来の `PickerRow`。
 - 選択はセクションをまたいで ↑↓ で移動する（平坦な配列の添字）。端で止まる。
 - `→` は選択がセットのときだけ内訳を開く。区画では `.ignored`。
@@ -354,7 +357,7 @@ final class CarbonInputSourceSwitcher: InputSourceSwitching   // TIS* を使う�
 ### 4.2 設定画面（CommandRow）
 
 - 各コマンド行のトグルの右（グリフの左）に ★ のトグルを足す（`Button` + `star.fill` / `star`、borderless、`.help("ピッカーの先頭に出す")`）。
-  対象は `command.sequence[0]`（単発コマンドなので唯一の区画）。
+  対象は `command.sequence[0]`（単発コマンドなので唯一の区画）。`CommandRow` が ★ を出すのもこの区画。
 - ループ系の行には出さない（同じ幅の空白を置いて列をそろえる）。
 - `FavoriteRegions` は `AppModel.favorites` の 1 つをピッカーと設定画面で共有する。`SettingsView` は `model` を持っているので、
   `CommandListTab` / `CommandRow` に `favorites` を引数で渡す（環境値は使わない。既存の `settings` と同じ渡し方）。
