@@ -82,6 +82,14 @@ final class AppModel {
         ) { [weak self] _ in
             Task { @MainActor in self?.refreshTrust() }
         }
+
+        // `NSApp.terminate` はウィンドウを閉じないので、ピッカーが開いたままだと `dismiss` が走らず
+        // 入力ソースが ABC のまま残る。終了時に閉じて元に戻す。
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closePicker() }
+        }
     }
 
     /// 権限要求とショートカット登録を行う。テストホストとして起動されたときは何もしない
@@ -111,7 +119,7 @@ final class AppModel {
         }
     }
 
-    /// レイアウトセットのピッカーを開く。出ていれば閉じる。
+    /// ピッカーを開く。出ていれば閉じる。
     func openPicker() {
         let picker = self.picker ?? PickerPanel(
             store: layoutSets,
@@ -157,7 +165,7 @@ final class AppModel {
         }
     }
 
-    /// レイアウトセットのピッカーを閉じる。開いていなければ何もしない。
+    /// ピッカーを閉じる。開いていなければ何もしない。
     func closePicker() {
         picker?.close()
     }

@@ -159,6 +159,7 @@ struct CommandRow: View {
                     favorites.toggle(command.sequence[0])
                 } label: {
                     Image(systemName: favorites.contains(command.sequence[0]) ? "star.fill" : "star")
+                        .frame(width: 16)
                 }
                 .buttonStyle(.borderless)
                 .help("ピッカーの先頭に出す")

@@ -146,11 +146,7 @@ struct PickerView: View {
         }
         .onKeyPress(characters: CharacterSet(charactersIn: "dD"), phases: .down) { press in
             guard press.modifiers.contains(.command), let region = selected?.region else { return .ignored }
-            favorites.toggle(region)
-            // 並びが変わるので、選択を同じ区画の新しい位置に移す。
-            if let index = items.firstIndex(of: .region(region)) {
-                state.selectedIndex = index
-            }
+            toggleFavorite(region)
             return .handled
         }
         .onKeyPress(.escape) {
@@ -236,7 +232,7 @@ struct PickerView: View {
                 isSelected: isSelected,
                 isFavorite: favorites.contains(action),
                 keyLabel: keyLabel(for: action),
-                onToggleFavorite: { favorites.toggle(action) }
+                onToggleFavorite: { toggleFavorite(action) }
             )
             .contentShape(Rectangle())
             .onTapGesture { onApplyRegion(action) }
@@ -259,6 +255,12 @@ struct PickerView: View {
     }
 
     /// 選択を動かす。見出しをまたいで一列に数え、端で止まり、循環しない。
+    /// ★ を付け外しし、並びが変わるので選択を同じ区画の新しい位置に移す。
+    private func toggleFavorite(_ region: SnapAction) {
+        favorites.toggle(region)
+        state.selectedIndex = items.firstIndex(of: .region(region)) ?? state.selectedIndex
+    }
+
     private func moveSelection(by delta: Int) {
         let count = items.count
         guard count > 0 else { return }
