@@ -92,13 +92,13 @@ log stream --predicate 'subsystem == "dev.hidekingerz.tatami" AND category == "D
 Xcode 26 以降が必要です。
 
 ```sh
-xcodebuild -project Tatami.xcodeproj -scheme Tatami -destination 'platform=macOS' build
-xcodebuild -project Tatami.xcodeproj -scheme Tatami -destination 'platform=macOS' test
+xcodebuild -project Tatami.xcodeproj -scheme Tatami -destination 'platform=macOS' -derivedDataPath build/DerivedData build
+xcodebuild -project Tatami.xcodeproj -scheme Tatami -destination 'platform=macOS' -derivedDataPath build/DerivedData test
 ```
 
 Xcode で `Tatami.xcodeproj` を開いて Run しても動きます。
 
-ビルドしたアプリは Xcode の DerivedData 配下（`~/Library/Developer/Xcode/DerivedData/Tatami-*/Build/Products/Debug/Tatami.app`）にできます。
+ビルドしたアプリはリポジトリ内の `build/DerivedData/Build/Products/Debug/Tatami.app` にできます（`build/` は git 管理外です）。
 `/Applications` にコピーして起動すると、アクセシビリティ権限の登録先のパスが固定されます。
 
 ### 「xcodebuild requires Xcode」と言われたら
