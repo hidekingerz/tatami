@@ -64,3 +64,6 @@ fastlane/test_output
 # brainstorming / browser tooling artifacts
 .superpowers/
 .playwright-mcp/
+
+# ローカルビルド出力（README の -derivedDataPath build/DerivedData）
+build/
