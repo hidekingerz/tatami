@@ -3,10 +3,19 @@ import KeyboardShortcuts
 import Observation
 import SwiftUI
 
-/// ピッカーの入力状態。パネルを閉じても残り、開くたびに `reset()` で初期化する。
+/// ピッカーの入力状態。パネルを閉じても残り、開くたびに `reset()` で初期化する。タブは閉じても覚えておく。
 @MainActor
 @Observable
 final class PickerState {
+    /// 今表示しているタブ。変わると保存し、選択と内訳を初期状態に戻す。検索欄の文字は残す。
+    var tab: PickerTab {
+        didSet {
+            guard tab != oldValue else { return }
+            defaults.set(tab.rawValue, forKey: PickerTab.defaultsKey)
+            selectedIndex = 0
+            expandedID = nil
+        }
+    }
     /// 検索欄の文字。変わると選択を先頭に戻す。
     var query = "" {
         didSet { selectedIndex = 0 }
@@ -18,31 +27,41 @@ final class PickerState {
     /// 増えるたびに検索欄へフォーカスを移す合図。パネルは使い回すので onAppear だけでは足りない。
     private(set) var focusRequest = 0
 
-    /// query で絞った見出し付きの一覧。セット、区画の順。区画はお気に入りを先頭に、カテゴリ順を保つ。
-    /// 一致が 0 件の見出しは含めない。
-    static func sections(sets: [LayoutSet], favorites: Set<SnapAction>, query: String) -> [PickerSection] {
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        tab = PickerTab.resolve(defaults.string(forKey: PickerTab.defaultsKey))
+    }
+
+    /// tab の一覧を query で絞った行。区画はお気に入りを先頭に、それぞれカテゴリ順を保つ。
+    static func items(tab: PickerTab, sets: [LayoutSet], favorites: Set<SnapAction>, query: String) -> [PickerItem] {
         let tokens = PickerQuery.tokens(query)
-        let matchedSets = sets.filter { PickerQuery.matches(tokens: tokens, terms: PickerQuery.terms(of: $0)) }
-        let all = SnapAction.allInCategoryOrder
-        let ordered = all.filter(favorites.contains) + all.filter { !favorites.contains($0) }
-        let matchedRegions = ordered.filter { PickerQuery.matches(tokens: tokens, terms: $0.searchTerms) }
-
-        var result: [PickerSection] = []
-        if !matchedSets.isEmpty {
-            result.append(PickerSection(title: "セット", items: matchedSets.map(PickerItem.set)))
+        switch tab {
+        case .sets:
+            return sets
+                .filter { PickerQuery.matches(tokens: tokens, terms: PickerQuery.terms(of: $0)) }
+                .map(PickerItem.set)
+        case .regions:
+            let all = SnapAction.allInCategoryOrder
+            let ordered = all.filter(favorites.contains) + all.filter { !favorites.contains($0) }
+            return ordered
+                .filter { PickerQuery.matches(tokens: tokens, terms: $0.searchTerms) }
+                .map(PickerItem.region)
         }
-        if !matchedRegions.isEmpty {
-            result.append(PickerSection(title: "区画", items: matchedRegions.map(PickerItem.region)))
-        }
-        return result
     }
 
-    /// 見出しを外して一列にした行。選択位置はこの並びで数える。
-    static func flatten(_ sections: [PickerSection]) -> [PickerItem] {
-        sections.flatMap(\.items)
+    /// 検索中に、もう一方のタブで一致する件数。検索欄が空（空白だけを含む）なら 0。
+    static func otherTabMatchCount(tab: PickerTab, sets: [LayoutSet], favorites: Set<SnapAction>, query: String) -> Int {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+        return items(tab: tab.other, sets: sets, favorites: favorites, query: query).count
     }
 
-    /// 開くたびに、検索と選択と内訳を初期状態に戻し、検索欄へフォーカスを移す。
+    func toggleTab() {
+        tab = tab.other
+    }
+
+    /// 開くたびに、検索と選択と内訳を初期状態に戻し、検索欄へフォーカスを移す。タブは前回のまま。
     func reset() {
         query = ""
         selectedIndex = 0
@@ -51,7 +70,7 @@ final class PickerState {
     }
 }
 
-/// レイアウトセットと区画を選んで適用するピッカーの中身。上に検索欄、中に見出し付きの行、下にキーのヒント。
+/// レイアウトセットと区画を選んで適用するピッカーの中身。上にタブと検索欄、中に今のタブの行、下にキーのヒント。
 ///
 /// キー操作は検索欄がフォーカスを持っていても効くよう、ルートの `.onKeyPress` で受ける
 /// （`NSPanel.keyDown` はフィールドエディタが先に消費するので届かない）。
@@ -96,12 +115,12 @@ struct PickerView: View {
         self.onClose = onClose
     }
 
-    private var sections: [PickerSection] {
-        PickerState.sections(sets: store.sets, favorites: favorites.regions, query: state.query)
+    private var items: [PickerItem] {
+        PickerState.items(tab: state.tab, sets: store.sets, favorites: favorites.regions, query: state.query)
     }
 
-    private var items: [PickerItem] {
-        PickerState.flatten(sections)
+    private var otherTabMatchCount: Int {
+        PickerState.otherTabMatchCount(tab: state.tab, sets: store.sets, favorites: favorites.regions, query: state.query)
     }
 
     /// 選択中の行。一覧が空なら nil。選択位置が一覧の外なら端に寄せる。
@@ -115,6 +134,9 @@ struct PickerView: View {
         VStack(spacing: 0) {
             searchBar
             Divider()
+            if otherTabMatchCount > 0 {
+                otherTabHint
+            }
             content
             Divider()
             hints
@@ -149,6 +171,16 @@ struct PickerView: View {
             toggleFavorite(region)
             return .handled
         }
+        // ⇥ と ⇧⇥ でタブを切り替える（⇧⇥ は backtab 文字 U+0019 で届く）。
+        .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")], phases: .down) { _ in
+            state.toggleTab()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "12"), phases: .down) { press in
+            guard press.modifiers.contains(.command) else { return .ignored }
+            state.tab = press.characters == "1" ? .sets : .regions
+            return .handled
+        }
         .onKeyPress(.escape) {
             onClose()
             return .handled
@@ -158,10 +190,14 @@ struct PickerView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
+            PickerTabSwitcher(selection: Binding(get: { state.tab }, set: { state.tab = $0 }))
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("セットや区画を検索…", text: Binding(get: { state.query }, set: { state.query = $0 }))
+            TextField(
+                state.tab == .sets ? "セットを検索…" : "区画を検索…",
+                text: Binding(get: { state.query }, set: { state.query = $0 })
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .focused($isSearchFocused)
@@ -173,10 +209,35 @@ struct PickerView: View {
         .padding(.vertical, 12)
     }
 
+    /// 今のタブで見つからなくても、もう一方にあることを知らせる。クリックか ⇥ で切り替える。
+    private var otherTabHint: some View {
+        Button {
+            state.toggleTab()
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(state.tab.other.label)\(items.isEmpty ? "に" : "にも") \(otherTabMatchCount) 件あります")
+                Text("⇥ 切り替え")
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(Color.accentColor.opacity(0.08))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var content: some View {
         if items.isEmpty {
-            message("一致する項目はありません")
+            if state.tab == .sets, store.sets.isEmpty {
+                message("セットはまだありません。設定の「セット」タブで作れます")
+            } else {
+                message("一致する項目はありません")
+            }
         } else {
             list
         }
@@ -191,21 +252,14 @@ struct PickerView: View {
     }
 
     private var list: some View {
-        let sections = sections
+        let items = items
         let selectedID = selected?.id
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(sections, id: \.title) { section in
-                        Text(section.title)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 6)
-                            .padding(.horizontal, 10)
-                        ForEach(section.items) { item in
-                            row(for: item, isSelected: item.id == selectedID)
-                                .id(item.id)
-                        }
+                    ForEach(items) { item in
+                        row(for: item, isSelected: item.id == selectedID)
+                            .id(item.id)
                     }
                 }
                 .padding(6)
@@ -246,7 +300,9 @@ struct PickerView: View {
     }
 
     private var hints: some View {
-        Text("⏎ 適用  ↑↓ 選択  →← 内訳  ⌘D ★  ⌘⏎ 編集  esc 閉じる")
+        Text(state.tab == .sets
+            ? "⏎ 適用  ↑↓ 選択  →← 内訳  ⌘⏎ 編集  ⇥ 区画へ  esc 閉じる"
+            : "⏎ 適用  ↑↓ 選択  ⌘D ★  ⌘⏎ 編集  ⇥ セットへ  esc 閉じる")
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -254,7 +310,7 @@ struct PickerView: View {
             .padding(.vertical, 8)
     }
 
-    /// 選択を動かす。見出しをまたいで一列に数え、端で止まり、循環しない。
+    /// 選択を動かす。端で止まり、循環しない。
     /// ★ を付け外しし、並びが変わるので選択を同じ区画の新しい位置に移す。
     private func toggleFavorite(_ region: SnapAction) {
         favorites.toggle(region)
@@ -284,6 +340,39 @@ struct PickerView: View {
                 onApplyRegion(action)
             }
         }
+    }
+}
+
+/// 検索欄の左に置くセット／区画の切り替え。クリックでも ⇥ でも切り替わる。
+/// フォーカスを取らないので、クリックしても検索欄に入力し続けられる。
+private struct PickerTabSwitcher: View {
+    @Binding var selection: PickerTab
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(PickerTab.allCases) { tab in
+                let isSelected = selection == tab
+                Button {
+                    selection = tab
+                } label: {
+                    Text(tab.label)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(isSelected ? Color.accentColor : Color.clear)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7).fill(.quaternary))
+        .help("⇥ で切り替え（⌘1 セット / ⌘2 区画）")
     }
 }
 

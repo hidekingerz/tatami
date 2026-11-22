@@ -22,8 +22,3 @@ enum PickerItem: Hashable, Identifiable, Sendable {
     }
 }
 
-/// 見出し付きの行のまとまり。
-struct PickerSection: Hashable, Sendable {
-    let title: String
-    let items: [PickerItem]
-}
